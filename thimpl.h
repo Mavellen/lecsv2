@@ -62,7 +62,6 @@ namespace ls::lecs
     {
       bool n = false;
       (t_traverse<T>(w,q,g,gh,index,n),...);
-      //traverse<T...>(w,q,g,gh,index,n);
       if(n) ++index;
     };
   }

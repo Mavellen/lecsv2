@@ -7,220 +7,6 @@
 #include <cstdint>
 #include <functional>
 
-// namespace ls::lecs
-// {
-//   using eid = uint64_t;
-//   using cid = uint64_t;
-//   using family = uint64_t;
-//   using hash = uint64_t;
-//   using qid = uint64_t;
-//
-//   constexpr size_t INIT_CAP = 10;
-//   constexpr hash VOID_HASH = 0;
-//   constexpr size_t HASH_SIZE = 64;
-//
-//   template<typename T>
-//   struct component
-//   {
-//     static constexpr cid _id {};
-//     static constexpr size_t _size {};
-//     static family family;
-//   };
-//
-//   struct column
-//   {
-//     void* at(size_t row) const;
-//     template<typename T, typename... Args>
-//     void aplace(size_t row, Args&&... args);
-//     void rswap(size_t row);
-//     void copy_element(column* other, size_t frow, size_t trow);
-//   private:
-//     static void mset(void* from, void* to, size_t fidx, size_t tidx, size_t length);
-//     void resize();
-//   public:
-//     size_t capacity, count;
-//     size_t element_size;
-//     cid component_id;
-//     void* elements;
-//   };
-//
-//   struct group
-//   {
-//     group() = default;
-//     group(group& g, cid exclude = 0);
-//     group(const group& g, cid exclude = 0);
-//     eid evict_entity(size_t row);
-//     std::pair<size_t, eid> ereloc(group* to, size_t frow, bool excludes = false, eid excludee = 0);
-//
-//     hash group_hash {0};
-//     std::vector<column*> columns {};
-//     std::vector<eid> entities {};
-//   };
-//
-//   struct e_query
-//   {
-//     void* query_ptr;
-//   };
-//
-//   struct world
-//   {
-//   private:
-//     struct gid_record
-//     {
-//       group* group_ptr;
-//       std::vector<cid> components;
-//     };
-//     struct eid_record
-//     {
-//       hash group_hash;
-//       size_t row;
-//     };
-//   public:
-//     std::vector<e_query> query_objects {};
-//     static const qid queries[];
-//     static const size_t query_amount;
-//   private:
-//     static char rchar();
-//     static hash thash(hash h1, hash h2);
-//   public:
-//     world();
-//     eid new_entity();
-//     void destroy_entity(eid entity);
-//     template<typename T>
-//     void include_in_family(cid family);
-//     template<typename T>
-//     bool has(eid entity);
-//     template<typename T>
-//     T* get(eid entity);
-//     template <typename T, typename... Args>
-//     void add(eid entity, Args&&... args);
-//     template<typename T>
-//     void remove(eid entity);
-//     template<qid N>
-//     void register_group(group* g, hash g_hash);
-//     template<qid N, typename... T>
-//     void execute(void(*lambda)(eid, T*...));
-//     void internal_put_components(size_t i);
-//   private:
-//     template<typename T>
-//     void new_component();
-//
-//   private:
-//     eid e_counter = 0;
-//     std::queue<eid> open_indices{};
-//
-//     static constexpr std::hash<std::string> hasher{};
-//
-//   public:
-//     std::unordered_map<hash, gid_record> groups {};
-//     std::vector<hash> component_hashes {};
-//     std::vector<eid_record> entities {};
-//     std::vector<std::unordered_map<hash, size_t>> cid_groups {};
-//     std::unordered_map<cid, std::vector<cid>> families{};
-//     std::vector<cid> component_family{};
-//   };
-//
-//   struct ccom
-//   {
-//     std::vector<const column*> columns;
-//     const group* g;
-//   };
-//
-//   template<qid N>
-//   struct query
-//   {
-//     template<typename... T>
-//     void each(void(*lambda)(eid, T*...))
-//     {
-//       for(auto& ccom : _ccoms)
-//       {
-//         for(size_t i = 0; i < ccom.g->entities.size(); i++)
-//         {
-//           size_t k = 0;
-//           while(k < ccom.columns.size())
-//           {
-//             lambda(
-//               ccom.g->entities[i],
-//               exec<T>(ccom, (k++), i)...
-//               );
-//           }
-//         }
-//       }
-//     }
-//     template <typename T>
-//     static T* exec(const ccom& com, const size_t column_index, const size_t position)
-//     {
-//       return (T*)com.columns[column_index]->at(position);
-//     }
-//     static void check_group(world* w, group* g, const hash gh, size_t& index)
-//     {
-//       const auto& [group_ptr, cid_vec] = w->groups[gh];
-//       for(auto c : cid_vec)
-//       {
-//         for(size_t i = 0; i < has_not_amount; i++)
-//         {
-//           if(has_not[i] == c) return;
-//         }
-//       }
-//
-//       for(size_t i = 0; i < has_amount; i++)
-//       {
-//         bool exists = false;
-//         for(auto c : cid_vec)
-//         {
-//           if(c == has[i])
-//           {
-//             exists = true;
-//             break;
-//           }
-//         }
-//         if(!exists) return;
-//       }
-//
-//       // TODO exclusivity
-//
-//       bool n = false;
-//       for(size_t i = fetch_amount; i != SIZE_MAX; i--)
-//       {
-//         const cid query_for = fetch[i];
-//         for(size_t k = 0; k < cid_vec.size(); k++)
-//         {
-//           if(cid_vec[k] == query_for)
-//           {
-//             if(_ccoms.size() <= index)
-//             {
-//               _ccoms.push_back({{}, nullptr});
-//               _ccoms[index].columns.push_back(g->columns[w->cid_groups.at(query_for).at(gh)]);
-//               _ccoms[index].g = g;
-//             }
-//             else
-//             {
-//               _ccoms[index].columns.push_back(g->columns[w->cid_groups.at(query_for).at(gh)]);
-//             }
-//             n = true;
-//             break;
-//           }
-//         }
-//       }
-//       if(n) index++;
-//     }
-//
-//   public:
-//     static std::vector<ccom> _ccoms;
-//     static const cid has[];
-//     static const cid has_not[];
-//     static const cid fetch[];
-//     static const size_t has_amount;
-//     static const size_t has_not_amount;
-//     static const size_t fetch_amount;
-//   private:
-//     friend world;
-//   };
-//
-//
-//
-// }
-
 namespace ls::lecs
 {
   using eid = uint64_t;
@@ -362,7 +148,6 @@ namespace ls::lecs
     }
   private:
     std::function<void(group*,int&)> lambda;
-    //void(*lambda)(group*,int&);
   };
 
   struct _has_not_
@@ -380,7 +165,6 @@ namespace ls::lecs
     }
   private:
     std::function<void(group*,int&)> lambda;
-    //void(*lambda)(group*,int&);
   };
 
   struct _fetch_
@@ -404,14 +188,9 @@ namespace ls::lecs
 
     template<typename T>
     void t_traverse(world* w, query* q, group* g, hash gh, size_t& index, bool& n);
-    // template<typename T>
-    // void traverse(world* w, query* q, group* g, hash gh, size_t& index, bool& n);
-    // template<typename T, typename... K>
-    // void traverse(world* w, query* q, group* g, hash gh, size_t& index, bool& n);
   private:
     size_t amount = 0;
     std::function<void(world*,query*,group*,hash,size_t&)> lambda;
-    //void(*lambda)(world*,query*,group*,hash,size_t&);
   };
 
   struct query
@@ -443,7 +222,7 @@ namespace ls::lecs
     template<typename T>
     T* exec(const ccom& com, size_t column_index, size_t position);
     template<typename T>
-    T* all_exec(const ccom& com, const size_t column_index);
+    T* all_exec(const ccom& com, size_t column_index);
   public:
     std::vector<ccom> _ccoms {};
   private:

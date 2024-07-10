@@ -13,5 +13,4 @@ namespace ls::lecs
     // TODO exclusive
     _fetch.execute(w, this, g, gh, index);
   }
-
 }
