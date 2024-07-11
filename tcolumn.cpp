@@ -32,6 +32,8 @@ namespace ls::lecs
 
   void column::copy_element(column* other, const size_t frow, const size_t trow)
   {
+    if(trow >= other->capacity)
+      other->resize();
     mset(
       elements,
       other->elements,

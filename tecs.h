@@ -14,7 +14,7 @@ namespace ls::lecs
   using cid = uint64_t;
   using hash = uint64_t;
   using family = uint64_t;
-  constexpr size_t INIT_CAP = 10;
+  constexpr size_t INIT_CAP = 1;
   constexpr hash VOID_HASH = 0;
   constexpr size_t HASH_SIZE = 64;
 
