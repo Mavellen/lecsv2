@@ -44,12 +44,12 @@ namespace ls::lecs
     return swapped_eid;
   }
 
-  std::pair<size_t, eid> group::ereloc(group* to, const size_t frow, const bool excludes, const cid excludee)
+  std::pair<size_t, eid> group::ereloc(group* to, const size_t frow, const cid excludee)
   {
     const size_t new_row = to->entities.size();
     for(auto* column : columns)
     {
-      if(excludes && column->component_id == excludee) continue;
+      if(column->component_id == excludee) continue;
       for(auto* new_col : to->columns)
       {
         if(new_col->component_id == column->component_id)

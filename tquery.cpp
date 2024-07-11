@@ -7,10 +7,15 @@ namespace ls::lecs
     int i = 0;
     _has.execute(g, i);
     if(i <= 0) return;
+
     i = 0;
     _has_not.execute(g, i);
     if(i <= 0) return;
-    // TODO exclusive
+
+    i = 0;
+    _exclusive_has.execute(w, g, i);
+    if(i <= 0) return;
+
     _fetch.execute(w, this, g, gh, index);
   }
 }

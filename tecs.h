@@ -6,6 +6,7 @@
 #include <string>
 #include <cstdint>
 #include <functional>
+#include <cassert>
 
 namespace ls::lecs
 {
@@ -18,6 +19,8 @@ namespace ls::lecs
   constexpr size_t HASH_SIZE = 64;
 
   struct query;
+  struct _exclusive_has_;
+  struct _fetch_;
 
   template<cid C>
   struct _hash_
@@ -36,14 +39,17 @@ namespace ls::lecs
   template<typename T>
   struct component
   {
-    static constexpr cid _id {0};
-    static constexpr size_t _size {0};
+    static constexpr cid _id {};
+    static constexpr size_t _size {};
   };
-#define register_component(type, id)\
+
+#define register_component(type, name, id)\
+  static_assert(id > 0 && "Ids for components must begin at 1!");\
   template<> struct ls::lecs::component<type>{\
   static constexpr cid _id {id};\
   static constexpr size_t _size {sizeof(type)};\
-  };
+  };\
+  constexpr cid name = id;
 
 
   struct column
@@ -69,7 +75,7 @@ namespace ls::lecs
     group(group& g, cid exclude = 0);
     group(const group& g, cid exclude = 0);
     eid evict_entity(size_t row);
-    std::pair<size_t, eid> ereloc(group* to, size_t frow, bool excludes = false, eid excludee = 0);
+    std::pair<size_t, eid> ereloc(group* to, size_t frow, eid excludee = 0);
 
     hash group_hash {0};
     std::vector<column*> columns {};
@@ -112,10 +118,11 @@ namespace ls::lecs
     void register_group(group* g, hash gh);
     template<typename T>
     void w_register_component();
+    [[nodiscard]] group* create_group(const group* og, hash gh, cid excludee = 0);
 
   private:
-    eid e_counter = 0;
-    family f_counter = 0;
+    eid e_counter = 1;
+    family f_counter = 1;
     std::queue<eid> open_indices {};
 
     static constexpr std::hash<std::string> hasher {};
@@ -123,10 +130,11 @@ namespace ls::lecs
     std::vector<query*> queries {};
     std::unordered_map<hash, gid_record> groups {};
     std::vector<eid_record> entities {};
-  public:
     std::unordered_map<cid, std::unordered_map<hash, size_t>> cid_groups {};
-  private:
     std::vector<std::vector<cid>> families {};
+
+    friend _exclusive_has_;
+    friend _fetch_;
   };
 
 
@@ -165,6 +173,20 @@ namespace ls::lecs
     }
   private:
     std::function<void(group*,int&)> lambda;
+  };
+
+  struct _exclusive_has_
+  {
+
+    _exclusive_has_() : lambda([](world* w, group*,int& i){i = 1;}){}
+    template<typename... T>
+    void construct();
+    void execute(world* w, group* g, int& i) const { lambda(w, g, i); }
+  private:
+    template<typename T>
+    void traverse(world* w, group* g, int& i);
+  private:
+    std::function<void(world* w, group*,int&)> lambda;
   };
 
   struct _fetch_
@@ -207,6 +229,8 @@ namespace ls::lecs
     template<typename... T>
     void has_not(){ _has_not.construct<T...>(); }
     template<typename... T>
+    void exclusive(){ _exclusive_has.construct<T...>(); }
+    template<typename... T>
     void fetch(){ _fetch.construct<T...>(); }
 
     template<typename... T>
@@ -223,11 +247,14 @@ namespace ls::lecs
     T* exec(const ccom& com, size_t column_index, size_t position);
     template<typename T>
     T* all_exec(const ccom& com, size_t column_index);
-  public:
     std::vector<ccom> _ccoms {};
   private:
     _has_ _has {};
     _has_not_ _has_not {};
+    _exclusive_has_ _exclusive_has {};
     _fetch_ _fetch {};
+
+    friend _fetch_;
+    friend world;
   };
 }

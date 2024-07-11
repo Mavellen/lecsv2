@@ -12,6 +12,8 @@ namespace ls::lecs
   {
     groups[VOID_HASH] = {new group};
     cid_groups[VOID_HASH] = {};
+    families.emplace_back();
+    entities.emplace_back(0);
   }
 
   char world::rchar()
@@ -50,8 +52,7 @@ namespace ls::lecs
   void world::destroy_entity(const eid entity)
   {
     auto& [group_hash, row] = entities[entity];
-    const auto& [group_ptr] = groups.at(group_hash);
-    const eid swapped_entity = group_ptr->evict_entity(row);
+    const eid swapped_entity = groups[group_hash].group_ptr->evict_entity(row);
     entities[swapped_entity].row = row;
     open_indices.push(entity);
   }
@@ -78,5 +79,28 @@ namespace ls::lecs
       size_t index = q->_ccoms.size();
       q->inspect_group(this, g, gh, index);
     }
+  }
+
+  [[nodiscard]]
+  group* world::create_group(const group* og, const hash gh, const cid excludee)
+  {
+    group* ng;
+    if(excludee)
+      ng = new group(*og, excludee);
+    else ng = new group(*og);
+
+    ng->group_hash = gh;
+    groups[gh] = { ng };
+
+    size_t index = 0;
+    for(const auto component : og->components)
+    {
+      if(component == excludee)
+        continue;
+      ng->components.push_back(component);
+      cid_groups[component][gh] = index++;
+    }
+
+    return ng;
   }
 }

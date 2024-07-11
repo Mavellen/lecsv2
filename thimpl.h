@@ -55,6 +55,46 @@ namespace ls::lecs
   }
 
   template <typename... T>
+  void _exclusive_has_::construct()
+  {
+    lambda = [this](world* w, group* g, int& i)
+    {
+      int temp = 0;
+      (traverse<T>(w, g, temp),...);
+      if(temp < 0)
+      {
+        --i;
+        return;
+      }
+      ++i;
+    };
+  }
+
+  template <typename T>
+  void _exclusive_has_::traverse(world* w, group* g, int& i)
+  {
+    const family fam = _family_<component<T>::_id>::_family;
+    const cid id = component<T>::_id;
+    // for all components in that group
+    for(const auto component_in_group : g->components)
+    {
+      // if its component T, ignore
+      if(component_in_group == id) continue;
+
+      // otherwise for all components in the family of component T
+      for(const auto component_in_family : w->families[fam])
+      {
+        // if family contains component of that group
+        if(component_in_family == component_in_group)
+        {
+          --i;
+          return;
+        }
+      }
+    }
+  }
+
+  template <typename... T>
   void _fetch_::construct()
   {
     ++amount;
@@ -178,16 +218,15 @@ namespace ls::lecs
   {
     if(families.size() <= family)
       return -1;
-    if(_family_<component<T>::_id>::_family == family)
+
+    lecs::family& f = _family_<component<T>::_id>::_family;
+    if(f == family)
       return 1;
 
-    int return_value = 0;
-    if(_family_<component<T>::_id>::_family != family)
-      return_value = 1;
+    f = family;
+    families[f].push_back(component<T>::_id);
 
-    _family_<component<T>::_id>::_family = family;
-    families[family].push_back(component<T>::_id);
-    return return_value;
+    return (f != family) ? 1 : 0;
   }
 
   template <typename T>
@@ -196,20 +235,20 @@ namespace ls::lecs
     const auto& [group_hash, row] = entities[entity];
     const auto& [group_ptr] = groups[group_hash];
     const cid id = component<T>::_id;
-    for(const auto comp : group_ptr->components)
-    {
-      if(comp == id) return true;
-    }
-    return false;
+
+    return std::any_of(
+      group_ptr->components.begin(),
+      group_ptr->components.end(),
+      [=](const cid c){return c == id;}
+      );
   }
 
   template <typename T>
   T* world::get(const eid entity)
   {
     const auto& [group_hash, row] = entities[entity];
-    const auto& [group_ptr] = groups[group_hash];
     const size_t index = cid_groups[component<T>::_id].at(group_hash);
-    return (T*) group_ptr->columns[index]->at(row);
+    return (T*) groups[group_hash].group_ptr->columns[index]->at(row);
   }
 
   template <typename T, typename... Args>
@@ -242,24 +281,18 @@ namespace ls::lecs
     group* next_group_ptr;
     if(!groups.contains(next_group_hash)) [[unlikely]]
     {
-      next_group_ptr = new group(*group_ptr);
-      next_group_ptr->group_hash = next_group_hash;
-      const auto new_column = new column{
-        INIT_CAP, 0, cid_size, cid_id, malloc(cid_size * INIT_CAP)
-      };
-      next_group_ptr->columns.push_back(new_column);
+      next_group_ptr = create_group(group_ptr, next_group_hash);
+      cid_groups[cid_id][next_group_hash] = next_group_ptr->components.size();
+      next_group_ptr->components.push_back(cid_id);
 
-      groups[next_group_hash] = { next_group_ptr };
-
-      size_t index = 0;
-      for(auto cid : group_ptr->components)
-      {
-        groups[next_group_hash].group_ptr->components.push_back(cid);
-        cid_groups[cid][next_group_hash] = index;
-        index++;
-      }
-      groups[next_group_hash].group_ptr->components.push_back(cid_id);
-      cid_groups[cid_id][next_group_hash] = index;
+      next_group_ptr->columns.push_back(
+          new column{
+            INIT_CAP,
+            0,
+            cid_size,
+            cid_id,
+            malloc(cid_size * INIT_CAP)
+          });
 
       register_group(next_group_ptr, next_group_hash);
     }
@@ -284,35 +317,17 @@ namespace ls::lecs
     auto& [group_hash, current_row]= entities[entity];
     const auto& [group_ptr] = groups[group_hash];
 
-    hash next_group_hash = VOID_HASH;
-    for(auto cid : group_ptr->components)
-    {
-      if(cid == cid_id) continue;
-      next_group_hash = thash(next_group_hash, cid_hash);
-    }
+    const hash next_group_hash = thash(group_hash, cid_hash);
 
-    group* next_group_ptr;
+    group* next_group_ptr = nullptr;
     if(!groups.contains(next_group_hash)) [[unlikely]]
     {
-      next_group_ptr = (group_ptr, component<T>::_id);
-
-      groups[next_group_hash] = { next_group_ptr };
-      size_t index = 0;
-      for(auto cid : group_ptr->components)
-      {
-        if(cid == component<T>::_id) continue;
-        groups[next_group_hash].group_ptr->components.push_back(cid);
-        cid_groups[cid][next_group_hash] = index;
-        index++;
-      }
-
-      groups[next_group_hash].group_ptr->components.push_back(component<T>::_id);
-
+      next_group_ptr = create_group(group_ptr, next_group_hash, cid_id);
       register_group(next_group_ptr, next_group_hash);
     }
     else [[likely]] next_group_ptr = groups.at(next_group_hash).group_ptr;
 
-    auto [next_row, swapped_entity] = group_ptr->ereloc(next_group_ptr, current_row, true, component<T>::_id);
+    auto [next_row, swapped_entity] = group_ptr->ereloc(next_group_ptr, current_row, cid_id);
 
     entities[swapped_entity].row = current_row;
     group_hash = next_group_hash;
