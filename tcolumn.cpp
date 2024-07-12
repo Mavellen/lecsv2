@@ -4,7 +4,7 @@ namespace ls::lecs
 {
   void column::mset(void* from, void* to, const size_t fidx, const size_t tidx, const size_t length)
   {
-    memmove(to + tidx, from + fidx, length);
+    memcpy(to + tidx, from + fidx, length);
   }
 
   void column::resize()
@@ -13,13 +13,14 @@ namespace ls::lecs
     capacity <<= 1;
     void* new_array = malloc(element_size * capacity);
     mset(elements, new_array, 0, 0, element_size * ccap);
+    //delete elements;
     free(elements);
     elements = new_array;
   }
 
   void* column::at(const size_t row) const
   {
-    return elements + element_size * row;
+    return (elements + (element_size * row));
   }
 
   void column::rswap(const size_t row)

@@ -13,6 +13,7 @@ namespace ls::lecs
     groups[VOID_HASH] = {new group};
     cid_groups[VOID_HASH] = {};
     families.emplace_back();
+    entities.reserve(INIT_CAP);
     entities.emplace_back(0);
   }
 
@@ -38,7 +39,7 @@ namespace ls::lecs
     if(open_indices.empty())
     {
       gen_eid = e_counter++;
-      entities.emplace_back(VOID_HASH, row);
+      entities.push_back({VOID_HASH, row});
     }
     else
     {

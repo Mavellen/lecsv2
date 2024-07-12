@@ -100,14 +100,26 @@ namespace ls::lecs
     ++amount;
     lambda = [this](world* w, query* q, group* g, const hash gh, size_t& index)
     {
-      bool n = false;
-      (t_traverse<T>(w,q,g,gh,index,n),...);
-      if(n) ++index;
+      size_t _index = 0;
+      (t_traverse<T...>(w,q,g,gh,index,_index));
+      if(_index) ++index;
     };
   }
 
-  template <typename T>
-  void _fetch_::t_traverse(world* w, query* q, group* g, const hash gh, size_t& index, bool& n)
+  // template <typename T>
+  // void _fetch_::construct()
+  // {
+  //   ++amount;
+  //   lambda = [this](world* w, query* q, group* g, const hash gh, size_t& index)
+  //   {
+  //     bool n = false;
+  //     (t_traverse<T>(w,q,g,gh,index,n),...);
+  //     if(n) ++index;
+  //   };
+  // }
+
+  template <typename T, typename K, typename... N>
+  void _fetch_::t_traverse(world* w, query* q, group* g, const hash gh, size_t& index, size_t& n)
   {
     const cid query_for = component<T>::_id;
     for(size_t k = 0; k < g->components.size(); k++)
@@ -124,11 +136,85 @@ namespace ls::lecs
         {
           q->_ccoms[index].columns.push_back(g->columns[w->cid_groups.at(query_for).at(gh)]);
         }
-        n = true;
+        ++n;;
+        //return;
+      }
+    }
+    t_traverse<K, N...>(w, q, g, gh, index, n);
+  }
+
+  template<typename T>
+  void _fetch_::t_traverse(world* w, query* q, group* g, hash gh, size_t& index, size_t& n)
+  {
+    const cid query_for = component<T>::_id;
+    for(size_t k = 0; k < g->components.size(); k++)
+    {
+      if(g->components[k] == query_for)
+      {
+        if(q->_ccoms.size() <= index)
+        {
+          q->_ccoms.push_back({{}, nullptr});
+          q->_ccoms[index].columns.push_back(g->columns[w->cid_groups.at(query_for).at(gh)]);
+          q->_ccoms[index].g = g;
+        }
+        else
+        {
+          q->_ccoms[index].columns.push_back(g->columns[w->cid_groups.at(query_for).at(gh)]);
+        }
+        ++n;
         return;
       }
     }
   }
+
+  // template <typename T>
+  // void _fetch_::t_traverse(world* w, query* q, group* g, const hash gh, size_t& index, bool& n)
+  // {
+  //   const cid query_for = component<T>::_id;
+  //   for(size_t k = 0; k < g->components.size(); k++)
+  //   {
+  //     if(g->components[k] == query_for)
+  //     {
+  //       if(q->_ccoms.size() <= index)
+  //       {
+  //         q->_ccoms.push_back({{}, nullptr});
+  //         q->_ccoms[index].columns.push_back(g->columns[w->cid_groups.at(query_for).at(gh)]);
+  //         q->_ccoms[index].g = g;
+  //       }
+  //       else
+  //       {
+  //         q->_ccoms[index].columns.push_back(g->columns[w->cid_groups.at(query_for).at(gh)]);
+  //       }
+  //       n = true;
+  //       return;
+  //     }
+  //   }
+  // }
+
+  // template <typename... T>
+  // void _fetch_::t_traverse(world* w, query* q, group* g, const hash gh, size_t& index, bool& n)
+  // {
+  //   const cid query_for = component<T>::_id;
+  //   for(size_t k = 0; k < g->components.size(); k++)
+  //   {
+  //     if(g->components[k] == query_for)
+  //     {
+  //       if(q->_ccoms.size() <= index)
+  //       {
+  //         q->_ccoms.push_back({{}, nullptr});
+  //         q->_ccoms[index].columns.push_back(g->columns[w->cid_groups.at(query_for).at(gh)]);
+  //         q->_ccoms[index].g = g;
+  //       }
+  //       else
+  //       {
+  //         q->_ccoms[index].columns.push_back(g->columns[w->cid_groups.at(query_for).at(gh)]);
+  //       }
+  //       n = true;
+  //       return;
+  //     }
+  //   }
+  //   t_traverse<T...>(w,q,g,gh,index,n);
+  // }
 
   template <typename... T>
   void query::each(void (*lambda)(eid, T*...))
@@ -137,12 +223,12 @@ namespace ls::lecs
     {
       for(size_t i = 0; i < ccom.g->entities.size(); i++)
       {
-        size_t k = 0;
-        while(k < ccom.columns.size())
+        size_t k = ccom.columns.size() - 1;
+        while(k != SIZE_MAX)
         {
           lambda(
             ccom.g->entities[i],
-            exec<T>(ccom, (k++), i)...
+            exec<T>(ccom, k--, i)...
           );
         }
       }
@@ -150,15 +236,15 @@ namespace ls::lecs
   }
 
   template <typename... T>
-  void query::batch_each(void (*lambda)(eid*, size_t, T*...))
+  void query::batch_each(void (*lambda)(const eid*, size_t, T*...))
   {
     for(auto& ccom : _ccoms)
     {
-      size_t k = 0;
+      size_t k = ccom.columns.size() - 1;
       lambda(
         ccom.g->entities.data(),
         ccom.g->entities.size(),
-        all_exec<T>(ccom, k++)...
+        all_exec<T>(ccom, k--)...
       );
     }
   }
@@ -170,24 +256,24 @@ namespace ls::lecs
     {
       for(size_t i = 0; i < ccom.g->entities.size(); i++)
       {
-        size_t k = 0;
-        while(k < ccom.columns.size())
+        size_t k = ccom.columns.size() - 1;
+        while(k != SIZE_MAX)
         {
-          lambda(exec<T>(ccom, (++k) - 1, i)...);
+          lambda(exec<T>(ccom, k--, i)...);
         }
       }
     }
   }
 
   template <typename... T>
-  void query::anon_batch(void (*lambda)(size_t, T*...))
+  void query::batch_anon(void (*lambda)(size_t, T*...))
   {
     for(auto& ccom : _ccoms)
     {
-      size_t k = 0;
+      size_t k = ccom.columns.size() - 1;
       lambda(
         ccom.g->entities.size(),
-        all_exec<T>(ccom, k++)...
+        all_exec<T>(ccom, k--)...
         );
     }
   }
@@ -195,7 +281,9 @@ namespace ls::lecs
   template <typename T>
   T* query::exec(const ccom& com, const size_t column_index, const size_t position)
   {
-    return (T*)com.columns[column_index]->at(position);
+    T* element = (T*)com.columns[column_index]->at(position);
+    return element;
+    //return (T*)com.columns[column_index]->at(position);
   }
 
   template <typename T>
@@ -211,6 +299,7 @@ namespace ls::lecs
     std::string str(HASH_SIZE, 0);
     std::ranges::generate_n(str.begin(), HASH_SIZE, rchar);
     _hash_<component<T>::_id>::_hash = hasher(str);
+    cid_groups[component<T>::_id] = {};
   }
 
   template <typename T>
@@ -261,7 +350,7 @@ namespace ls::lecs
       w_register_component<T>();
       cid_hash = _hash_<cid_id>::_hash;
     }
-    const size_t cid_size = component<T>::_size;
+    const size_t cid_size = sizeof(T);
 
     auto& [group_hash, current_row]= entities[entity];
     const auto& [group_ptr] = groups[group_hash];
@@ -286,13 +375,10 @@ namespace ls::lecs
       next_group_ptr->components.push_back(cid_id);
 
       next_group_ptr->columns.push_back(
-          new column{
-            INIT_CAP,
-            0,
-            cid_size,
-            cid_id,
-            malloc(cid_size * INIT_CAP)
-          });
+        new column{
+          INIT_CAP, 0, cid_size,
+          cid_id, malloc(INIT_CAP * cid_size)
+        });
 
       register_group(next_group_ptr, next_group_hash);
     }

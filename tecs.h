@@ -6,7 +6,6 @@
 #include <string>
 #include <cstdint>
 #include <functional>
-#include <cassert>
 
 namespace ls::lecs
 {
@@ -40,14 +39,12 @@ namespace ls::lecs
   struct component
   {
     static constexpr cid _id {};
-    static constexpr size_t _size {};
   };
 
 #define register_component(type, name, id)\
   static_assert(id > 0 && "Ids for components must begin at 1!");\
   template<> struct ls::lecs::component<type>{\
   static constexpr cid _id {id};\
-  static constexpr size_t _size {sizeof(type)};\
   };\
   constexpr cid name = id;
 
@@ -71,7 +68,10 @@ namespace ls::lecs
 
   struct group
   {
-    group() = default;
+    group()
+    {
+      entities.reserve(INIT_CAP);
+    };
     group(group& g, cid exclude = 0);
     group(const group& g, cid exclude = 0);
     eid evict_entity(size_t row);
@@ -177,7 +177,6 @@ namespace ls::lecs
 
   struct _exclusive_has_
   {
-
     _exclusive_has_() : lambda([](world* w, group*,int& i){i = 1;}){}
     template<typename... T>
     void construct();
@@ -207,9 +206,15 @@ namespace ls::lecs
       ++amount;
       count<K...>();
     }
-
+    // void t_traverse(world* w, query* q, group* g, hash gh, size_t& index, bool& n){};
+    // template<typename... T>
+    // void t_traverse(world* w, query* q, group* g, hash gh, size_t& index, bool& n);
+    template<typename T, typename K, typename... N>
+    void t_traverse(world* w, query* q, group* g, hash gh, size_t& index, size_t& n);
+    // template<typename T>
+    // void t_traverse(world* w, query* q, group* g, hash gh, size_t& index, bool& n);
     template<typename T>
-    void t_traverse(world* w, query* q, group* g, hash gh, size_t& index, bool& n);
+    void t_traverse(world* w, query* q, group* g, hash gh, size_t& index, size_t& n);
   private:
     size_t amount = 0;
     std::function<void(world*,query*,group*,hash,size_t&)> lambda;
@@ -236,11 +241,11 @@ namespace ls::lecs
     template<typename... T>
     void each(void(*lambda)(eid, T*...));
     template<typename... T>
-    void batch_each(void(*lambda)(eid*,size_t,T*...));
+    void batch_each(void(*lambda)(const eid*,size_t,T*...));
     template<typename... T>
     void anon_each(void(*lambda)(T*...));
     template<typename... T>
-    void anon_batch(void(*lambda)(size_t,T*...));
+    void batch_anon(void(*lambda)(size_t,T*...));
     void inspect_group(world* w, group* g, hash gh, size_t& index);
   private:
     template<typename T>

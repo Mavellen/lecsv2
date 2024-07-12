@@ -15,6 +15,7 @@ namespace ls::lecs
         }
       );
     }
+    entities.reserve(INIT_CAP);
   }
   group::group(const group& g, const cid exclude)
   {
@@ -29,6 +30,7 @@ namespace ls::lecs
         }
       );
     }
+    entities.reserve(INIT_CAP);
   }
 
   eid group::evict_entity(const size_t row)
