@@ -6,14 +6,23 @@
 #include <string>
 #include <cstdint>
 #include <functional>
+#include <algorithm>
+#include <unordered_set>
+
 
 namespace ls::lecs
 {
+#define V3
+#ifndef INIT_CAP_ENTITIES
+#define INIT_CAP_ENTITIES 100
+#endif
+
   using eid = uint64_t;
   using cid = uint64_t;
   using hash = uint64_t;
   using family = uint64_t;
-  constexpr size_t INIT_CAP = 1;
+
+  constexpr size_t INIT_CAP = 10;
   constexpr hash VOID_HASH = 0;
   constexpr size_t HASH_SIZE = 64;
 
@@ -21,33 +30,37 @@ namespace ls::lecs
   struct _exclusive_has_;
   struct _fetch_;
 
-  template<cid C>
-  struct _hash_
-  {
-    static hash _hash;
-  };
-  template<cid C> hash _hash_<C>::_hash;
+  // template<cid C>
+  // struct _hash_
+  // {
+  //   static hash _hash;
+  // };
+  // template<cid C> hash _hash_<C>::_hash;
 
-  template<cid C>
-  struct _family_
-  {
-    static family _family;
-  };
-  template<cid C> family _family_<C>::_family;
+  // template<cid C>
+  // struct _family_
+  // {
+  //   static family _family;
+  // };
+  // template<cid C> family _family_<C>::_family;
 
-  template<typename T>
-  struct component
+  template<class T>
+  struct _component_
   {
     static constexpr cid _id {};
   };
 
-#define register_component(type, name, id)\
-  static_assert(id > 0 && "Ids for components must begin at 1!");\
-  template<> struct ls::lecs::component<type>{\
-  static constexpr cid _id {id};\
-  };\
-  constexpr cid name = id;
+#define new_component(type, id)\
+static_assert(id > 0 && "Ids for components must begin at 1!");\
+template<> struct ls::lecs::_component_<type>{\
+static constexpr cid _id {id};\
+};\
+struct ___i##id{\
+typedef type _type;\
+};\
 
+#define id_from_type(type) _component_<type>::_id
+#define type_from_id(id) ___i##id::_type
 
   struct column
   {
@@ -62,7 +75,6 @@ namespace ls::lecs
   public:
     size_t capacity, count;
     size_t element_size;
-    cid component_id;
     void* elements;
   };
 
@@ -70,14 +82,16 @@ namespace ls::lecs
   {
     group()
     {
-      entities.reserve(INIT_CAP);
+      entities.reserve(INIT_CAP_ENTITIES);
+      size = 0;
     };
-    group(group& g, cid exclude = 0);
-    group(const group& g, cid exclude = 0);
+    group(group& g, hash h, cid exclude = 0);
+    group(const group& g, hash h, cid exclude = 0);
     eid evict_entity(size_t row);
     std::pair<size_t, eid> ereloc(group* to, size_t frow, eid excludee = 0);
 
     hash group_hash {0};
+    int size = 0;
     std::vector<column*> columns {};
     std::vector<eid> entities {};
     std::vector<cid> components {};
@@ -86,25 +100,20 @@ namespace ls::lecs
   struct world
   {
   private:
-    struct gid_record
-    {
-      group* group_ptr;
-    };
     struct eid_record
     {
-      hash group_hash;
+      group* group_hash;
       size_t row;
     };
   private:
-    static char rchar();
     static hash thash(hash h1, hash h2);
   public:
-    world();
+    explicit world(size_t ct_amount);
     eid new_entity();
     family new_family();
     void destroy_entity(eid entity);
     template<typename T>
-    int include_in_family(family f);
+    void include_in_family(family f);
     template<typename T>
     bool has(eid entity);
     template<typename T>
@@ -116,8 +125,6 @@ namespace ls::lecs
     void register_query(query* q);
   private:
     void register_group(group* g, hash gh);
-    template<typename T>
-    void w_register_component();
     [[nodiscard]] group* create_group(const group* og, hash gh, cid excludee = 0);
 
   private:
@@ -128,16 +135,86 @@ namespace ls::lecs
     static constexpr std::hash<std::string> hasher {};
 
     std::vector<query*> queries {};
-    std::unordered_map<hash, gid_record> groups {};
+    std::unordered_map<hash, group*> groups {};
     std::vector<eid_record> entities {};
     std::unordered_map<cid, std::unordered_map<hash, size_t>> cid_groups {};
-    std::vector<std::vector<cid>> families {};
-
+    std::vector<std::unordered_set<cid>> _families {};
+    std::vector<hash> _component_hashes {};
+#ifdef V2
     friend _exclusive_has_;
     friend _fetch_;
+#endif
   };
 
 
+#ifdef V3
+  struct query
+  {
+  private:
+    struct cache
+    {
+      std::vector<column*> columns {};
+      const group* g;
+    };
+  public:
+    template<typename T, typename K, typename... N>
+    void has(){ _has.push_back(id_from_type(T)); has<K, N...>(); }
+    template<typename T>
+    void has(){ _has.push_back(id_from_type(T)); }
+    template<typename T, typename K, typename... N>
+    void has_not(){ _hasnt.push_back(id_from_type(T)); has_not<K, N...>(); }
+    template<typename T>
+    void has_not(){ _hasnt.push_back(id_from_type(T)); }
+    template<typename T, typename K, typename... N>
+    void exclusive(){ _exclusive_in_family.push_back(id_from_type(T)); exclusive<K, N...>();}
+    template<typename T>
+    void exclusive(){ _exclusive_in_family.push_back(id_from_type(T));}
+    template<typename T, typename K, typename... N>
+    void fetch(){ _fetch.push_back(id_from_type(T)); fetch<K, N...>(); }
+    template<typename T>
+    void fetch(){ _fetch.push_back(id_from_type(T)); }
+
+    template<typename... T>
+    void each(void(*lambda)(eid, T*...));
+    template<typename... T, typename... K>
+    void each(void(*lambda)(eid,std::tuple<K...>&,T*...),std::tuple<K...>&);
+
+    template<typename... T>
+    void batch_each(void(*lambda)(const eid*,size_t,T*...));
+    template<typename... T, typename... K>
+    void batch_each(void(*lambda)(const eid*,size_t,std::tuple<K...>&,T*...),std::tuple<K...>&);
+
+    template<typename... T>
+    void anon_each(void(*lambda)(T*...));
+    template<typename... T, typename... K>
+    void anon_each(void(*lambda)(std::tuple<K...>&, T*...),std::tuple<K...>&);
+
+    template <typename... T>
+    void batch_anon(void (*lambda)(size_t, T*...));
+    template<typename... T, typename... K>
+    void batch_anon(void(*lambda)(size_t,std::tuple<K...>&,T*...),std::tuple<K...>&);
+
+    void inspect_group(group* g);
+  private:
+    void fetch_traverse(group*);
+    bool has_traverse(group*);
+    bool hasnt_traverse(group*);
+    bool exclusive_traverse(group*){ return true; };
+
+    template<typename T>
+    T* unpack_each(const cache& com, size_t column_index, size_t position);
+    template<typename T>
+    T* unpack_all(const cache& com, size_t column_index);
+  private:
+    std::vector<cache> _caches {};
+    std::vector<cid> _has {};
+    std::vector<cid> _hasnt {};
+    std::vector<cid> _fetch {};
+    std::vector<cid> _exclusive_in_family {};;
+  };
+#endif
+
+#ifdef V2
   struct _has_
   {
     _has_() : lambda([](group*,int& i){i = 1;}){}
@@ -220,6 +297,7 @@ namespace ls::lecs
     std::function<void(world*,query*,group*,hash,size_t&)> lambda;
   };
 
+
   struct query
   {
   private:
@@ -240,12 +318,24 @@ namespace ls::lecs
 
     template<typename... T>
     void each(void(*lambda)(eid, T*...));
+    template<typename... T, typename... K>
+    void each(void(*lambda)(eid,std::tuple<K...>&,T*...),std::tuple<K...>&);
+
     template<typename... T>
     void batch_each(void(*lambda)(const eid*,size_t,T*...));
+    template<typename... T, typename... K>
+    void batch_each(void(*lambda)(const eid*,size_t,std::tuple<K...>&,T*...),std::tuple<K...>&);
+
     template<typename... T>
     void anon_each(void(*lambda)(T*...));
-    template<typename... T>
-    void batch_anon(void(*lambda)(size_t,T*...));
+    template<typename... T, typename... K>
+    void anon_each(void(*lambda)(std::tuple<K...>&, T*...),std::tuple<K...>&);
+
+    template <typename... T>
+    void batch_anon(void (*lambda)(size_t, T*...));
+    template<typename... T, typename... K>
+    void batch_anon(void(*lambda)(size_t,std::tuple<K...>&,T*...),std::tuple<K...>&);
+
     void inspect_group(world* w, group* g, hash gh, size_t& index);
   private:
     template<typename T>
@@ -262,4 +352,5 @@ namespace ls::lecs
     friend _fetch_;
     friend world;
   };
+#endif
 }

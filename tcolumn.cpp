@@ -13,7 +13,6 @@ namespace ls::lecs
     capacity <<= 1;
     void* new_array = malloc(element_size * capacity);
     mset(elements, new_array, 0, 0, element_size * ccap);
-    //delete elements;
     free(elements);
     elements = new_array;
   }
