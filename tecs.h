@@ -9,40 +9,32 @@
 #include <algorithm>
 #include <unordered_set>
 
-
 namespace ls::lecs
 {
 #define V3
+
 #ifndef INIT_CAP_ENTITIES
 #define INIT_CAP_ENTITIES 100
 #endif
 
-  using eid = uint64_t;
+  using eid = uint32_t;
   using cid = uint64_t;
   using hash = uint64_t;
-  using family = uint64_t;
+  using family = uint8_t;
 
   constexpr size_t INIT_CAP = 10;
   constexpr hash VOID_HASH = 0;
-  constexpr size_t HASH_SIZE = 64;
+  constexpr size_t HASH_SIZE = sizeof(hash);
+  constexpr size_t COMPONENT_SIZE = sizeof(cid);
+
+#define to_tag (COMPONENT_SIZE-1)
+#define to_tt_relation (COMPONENT_SIZE-2)
+#define to_te_relation (COMPONENT_SIZE-3)
+#define to_tWv_relation (COMPONENT_SIZE-4)
 
   struct query;
   struct _exclusive_has_;
   struct _fetch_;
-
-  // template<cid C>
-  // struct _hash_
-  // {
-  //   static hash _hash;
-  // };
-  // template<cid C> hash _hash_<C>::_hash;
-
-  // template<cid C>
-  // struct _family_
-  // {
-  //   static family _family;
-  // };
-  // template<cid C> family _family_<C>::_family;
 
   template<class T>
   struct _component_
@@ -51,16 +43,25 @@ namespace ls::lecs
   };
 
 #define new_component(type, id)\
-static_assert(id > 0 && "Ids for components must begin at 1!");\
+static_assert(id > 0 && "ID 0 is reserved!");\
 template<> struct ls::lecs::_component_<type>{\
 static constexpr cid _id {id};\
 };\
-struct ___i##id{\
-typedef type _type;\
-};\
 
 #define id_from_type(type) _component_<type>::_id
-#define type_from_id(id) ___i##id::_type
+
+#define new_tag(type, id)\
+static_assert(id > 0 && "ID 0 is reserved!");\
+template<> struct ls::lecs::_component_<type>{\
+static constexpr cid _id {(cid)id | ((cid)1<<to_tag)};\
+};\
+
+  template<typename T, typename K>
+  struct _relation_
+  {
+    static cid _id;
+  };
+  template<typename T, typename K> cid _relation_<T,K>::_id = 0;
 
   struct column
   {
@@ -85,8 +86,8 @@ typedef type _type;\
       entities.reserve(INIT_CAP_ENTITIES);
       size = 0;
     };
-    group(group& g, hash h, cid exclude = 0);
-    group(const group& g, hash h, cid exclude = 0);
+    group(group& g, hash h, bool is_tag, cid exclude = 0);
+    group(const group& g, hash h, bool is_tag, cid exclude = 0);
     eid evict_entity(size_t row);
     std::pair<size_t, eid> ereloc(group* to, size_t frow, eid excludee = 0);
 
@@ -102,14 +103,22 @@ typedef type _type;\
   private:
     struct eid_record
     {
-      group* group_hash;
+      group* group;
       size_t row;
     };
   private:
+    static bool is_tag(const cid id){ return (id >> to_tag); }
+    static bool is_ttr(const cid id){ return (id >> to_tt_relation); }
+    static bool is_ter(const cid id){ return (id >> to_te_relation); }
+    static bool is_tevr(const cid id){ return (id >> to_tWv_relation); }
+    static cid to_realid_tag(const cid id){return id ^ ((cid)1<<to_tag);}
+
+    static hash create_hash();
     static hash thash(hash h1, hash h2);
   public:
     explicit world(size_t ct_amount);
     eid new_entity();
+    cid new_relation();
     family new_family();
     void destroy_entity(eid entity);
     template<typename T>
@@ -121,11 +130,19 @@ typedef type _type;\
     template <typename T, typename... Args>
     void add(eid entity, Args&&... args);
     template<typename T>
+    void tag(eid entity);
+    template<typename T, typename K>
+    void relate(eid entity);
+    template<typename T, typename K, typename N, typename... Args>
+    void relate(eid entity, Args&&... args);
+    template<typename T>
+    void remove_tag(eid entity);
+    template<typename T>
     void remove(eid entity);
     void register_query(query* q);
   private:
-    void register_group(group* g, hash gh);
-    [[nodiscard]] group* create_group(const group* og, hash gh, cid excludee = 0);
+    void register_group(group* g);
+    [[nodiscard]] group* create_group(const group* og, hash gh, bool is_tag, cid excludee = 0);
 
   private:
     eid e_counter = 1;
@@ -137,9 +154,18 @@ typedef type _type;\
     std::vector<query*> queries {};
     std::unordered_map<hash, group*> groups {};
     std::vector<eid_record> entities {};
-    std::unordered_map<cid, std::unordered_map<hash, size_t>> cid_groups {};
+    std::vector<std::vector<hash>> _component_groups_vec {};
     std::vector<std::unordered_set<cid>> _families {};
     std::vector<hash> _component_hashes {};
+    std::vector<hash> _relations {};
+    // entity-entity relations dont need to be in archetypes
+    // not only for the fact that this would lead to a doubling of archetypes
+    // because every archetype can be with or without a relation of such an id
+    // also its just entity-entity, there is not real values involved
+    //std::unordered_map<eid, std::vector<ee_relation>> _entity_entity_relations {};
+
+    friend query;
+    friend group;
 #ifdef V2
     friend _exclusive_has_;
     friend _fetch_;
@@ -194,23 +220,28 @@ typedef type _type;\
     template<typename... T, typename... K>
     void batch_anon(void(*lambda)(size_t,std::tuple<K...>&,T*...),std::tuple<K...>&);
 
-    void inspect_group(group* g);
+    void inspect_group(world* w, group* g);
+    void create_cache(world* w);
   private:
     void fetch_traverse(group*);
     bool has_traverse(group*);
     bool hasnt_traverse(group*);
-    bool exclusive_traverse(group*){ return true; };
+    bool exclusive_traverse(world* w, group*);
 
     template<typename T>
     T* unpack_each(const cache& com, size_t column_index, size_t position);
     template<typename T>
     T* unpack_all(const cache& com, size_t column_index);
+  public:
+    char _up_to_date = 0;
   private:
     std::vector<cache> _caches {};
     std::vector<cid> _has {};
     std::vector<cid> _hasnt {};
     std::vector<cid> _fetch {};
     std::vector<cid> _exclusive_in_family {};;
+
+    friend world;
   };
 #endif
 

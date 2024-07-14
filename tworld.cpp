@@ -1,39 +1,46 @@
 #include <random>
 
 #include "tecs.h"
-
 #include <cstring>
-#include <random>
+
+#include "thimpl.h"
 
 namespace ls::lecs
 {
   world::world(size_t ct_amount)
   {
     groups[VOID_HASH] = {new group()};
-    cid_groups[VOID_HASH] = {};
+    groups[VOID_HASH]->size = 0;
+    _component_groups_vec.reserve(ct_amount);
+    _component_groups_vec.push_back({VOID_HASH});
     _component_hashes.push_back(VOID_HASH);
 
-    std::string str(HASH_SIZE, 0);
     for(size_t i = 0; i < ct_amount; i++)
     {
-      std::ranges::generate_n(str.begin(), HASH_SIZE, []()
-      {
-        static constexpr auto chars =
-          "0123456789"
-          "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-          "abcdefghijklmnopqrstuvwxyz";
-        static constexpr size_t max_index = (strlen(chars) - 1);
-        static std::random_device rd;
-        static std::mt19937 gen(rd());
-        static std::uniform_int_distribution<> distributor(0, max_index);
-        return chars[distributor(gen)];
-      });
-      _component_hashes[0] = hasher(str);
-      cid_groups[i] = {};
+      _component_hashes.push_back(create_hash());
+      _component_groups_vec.emplace_back();
     }
     _families.emplace_back();
     entities.reserve(INIT_CAP_ENTITIES);
     entities.push_back({});
+  }
+
+  hash world::create_hash()
+  {
+    std::string str(HASH_SIZE, 0);
+    std::ranges::generate_n(str.begin(), HASH_SIZE, []()
+    {
+      static constexpr auto chars =
+        "0123456789"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz";
+      static constexpr size_t max_index = (strlen(chars) - 1);
+      static std::random_device rd;
+      static std::mt19937 gen(rd());
+      static std::uniform_int_distribution<> distributor(0, max_index);
+      return chars[distributor(gen)];
+    });
+    return hasher(str);
   }
 
   hash world::thash(const hash h1, const hash h2) { return h1 ^ h2; }
@@ -61,6 +68,7 @@ namespace ls::lecs
   {
     auto& [group, row] = entities[entity];
     const eid swapped_entity = group->evict_entity(row);
+    entities[swapped_entity].group = group;
     entities[swapped_entity].row = row;
     open_indices.push(entity);
   }
@@ -71,41 +79,39 @@ namespace ls::lecs
     return f_counter++;
   }
 
+  cid world::new_relation()
+  {
+    cid id = _relations.size();
+    _relations.push_back(create_hash());
+    return id;
+  }
+
   void world::register_query(query* q)
   {
     queries.push_back(q);
-    for(const auto& [hash, group] : groups)
-    {
-      q->inspect_group(group);
-    }
+    q->create_cache(this);
   }
-  void world::register_group(group* g, const hash gh)
+  void world::register_group(group* g)
   {
     for(auto q : queries)
     {
-      q->inspect_group(g);
+      q->inspect_group(this, g);
     }
   }
 
   [[nodiscard]]
-  group* world::create_group(const group* og, const hash gh, const cid excludee)
+  group* world::create_group(const group* og, const hash gh, const bool is_tag, const cid excludee)
   {
     group* ng;
     if(excludee)
-      ng = new group(*og, gh, excludee);
-    else ng = new group(*og, gh);
+      ng = new group(*og, gh, is_tag, excludee);
+    else ng = new group(*og, gh, is_tag);
 
-    for(int i = 0; i < ng->size; i++)
+    for(cid component : ng->components)
     {
-      cid_groups[ng->components[i]][gh] = i;
+      cid realid = world::is_tag(component) ? to_realid_tag(component) : component;
+      _component_groups_vec[realid].push_back(gh);
     }
-    // size_t index = 0;
-    // for(const auto component : og->components)
-    // {
-    //   if(component == excludee)
-    //     continue;
-    //   cid_groups[component][gh] = index++;
-    // }
     groups[gh] = ng;
     return ng;
   }

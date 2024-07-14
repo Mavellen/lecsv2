@@ -2,40 +2,66 @@
 
 namespace ls::lecs
 {
-  group::group(group& g, const hash h ,const cid exclude)
+  group::group(group& g, const hash h, const bool is_tag, const cid exclude)
   {
-    size_t reserve = exclude ? g.size - 1 : g.size + 1;
-    size = exclude ? g.size - 1 : g.size + 1;
-    columns.reserve(reserve);
-    components.reserve(reserve);
-    entities.reserve(INIT_CAP_ENTITIES);
+    if(exclude)
+    {
+      columns.reserve(g.size - 1);
+      components.reserve(g.size - 1);
+      size = is_tag ? g.size : g.size-1;
+    }
+    else
+    {
+      columns.reserve(g.size + 1);
+      components.reserve(g.size + 1);
+      size = is_tag ? g.size : g.size+1;
+    }
+
     group_hash = h;
-    for(int i = 0; i < g.size; i++)
+    entities.reserve(INIT_CAP_ENTITIES);
+
+    for(int i = 0; i < g.components.size(); i++)
     {
       if(g.components[i] == exclude) continue;
-      columns.push_back(new column{
-        INIT_CAP, g.components[i], g.columns[i]->element_size,
+      components.push_back(g.components[i]);
+      if(i < g.size)
+      {
+        columns.push_back(new column{
+        INIT_CAP, 0, g.columns[i]->element_size,
         malloc(INIT_CAP * g.columns[i]->element_size)
       });
-      components.push_back(g.components[i]);
+      }
     }
   }
-  group::group(const group& g, const hash h, const cid exclude)
+  group::group(const group& g, const hash h, const bool is_tag, const cid exclude)
   {
-    size_t reserve = exclude ? g.size - 1 : g.size + 1;
-    size = exclude ? g.size - 1 : g.size + 1;
-    columns.reserve(reserve);
-    components.reserve(reserve);
-    entities.reserve(INIT_CAP_ENTITIES);
+    if(exclude)
+    {
+      columns.reserve(g.size - 1);
+      components.reserve(g.size - 1);
+      size = is_tag ? g.size : g.size-1;
+    }
+    else
+    {
+      columns.reserve(g.size + 1);
+      components.reserve(g.size + 1);
+      size = is_tag ? g.size : g.size+1;
+    }
+
     group_hash = h;
-    for(int i = 0; i < g.size; i++)
+    entities.reserve(INIT_CAP_ENTITIES);
+
+    for(int i = 0; i < g.components.size(); i++)
     {
       if(g.components[i] == exclude) continue;
-      columns.push_back(new column{
-        INIT_CAP, g.components[i], g.columns[i]->element_size,
+      components.push_back(g.components[i]);
+      if(i < g.size)
+      {
+        columns.push_back(new column{
+        INIT_CAP, 0, g.columns[i]->element_size,
         malloc(INIT_CAP * g.columns[i]->element_size)
       });
-      components.push_back(g.components[i]);
+      }
     }
   }
 
@@ -58,11 +84,13 @@ namespace ls::lecs
     for(int i = 0; i < size; i++)
     {
       if(components[i] == excludee) continue;
+      if(world::is_tag(components[i]))       // UNSURE
+        continue;
       for(int k = 0; k < size; k++)
       {
-        if(components[i] == to->components[i])
+        if(components[i] == to->components[k])
         {
-          columns[i]->copy_element(to->columns[i], frow, new_row);
+          columns[i]->copy_element(to->columns[k], frow, new_row);
           break;
         }
       }
