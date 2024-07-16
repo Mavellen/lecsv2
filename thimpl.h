@@ -293,7 +293,7 @@ namespace ls::lecs
 #ifdef V3
 
   template <typename... T>
-  void query::each(void (*lambda)(eid, T*...))
+  void query::each(void (*lambda)(ecsid, T*...))
   {
     for(auto& cache : _caches)
     {
@@ -312,7 +312,7 @@ namespace ls::lecs
   }
 
   template<typename... T, typename... K>
-  void query::each(void(*lambda)(eid,std::tuple<K...>&,T*...),std::tuple<K...>& tup)
+  void query::each(void(*lambda)(ecsid,std::tuple<K...>&,T*...),std::tuple<K...>& tup)
   {
     for(auto& cache : _caches)
     {
@@ -332,7 +332,7 @@ namespace ls::lecs
   }
 
   template <typename... T>
-  void query::batch_each(void (*lambda)(const eid*, size_t, T*...))
+  void query::batch_each(void (*lambda)(const ecsid*, size_t, T*...))
   {
     for(auto& cache : _caches)
     {
@@ -346,7 +346,7 @@ namespace ls::lecs
   }
 
   template<typename... T, typename... K>
-  void query::batch_each(void(*lambda)(const eid*,size_t,std::tuple<K...>&,T*...),std::tuple<K...>& tup)
+  void query::batch_each(void(*lambda)(const ecsid*,size_t,std::tuple<K...>&,T*...),std::tuple<K...>& tup)
   {
     for(auto& cache : _caches)
     {
@@ -431,12 +431,13 @@ namespace ls::lecs
     return (T*)com.columns[column_index]->elements;
   }
 #endif
+
   template <typename T>
   void world::include_in_family(const family family)
   {
     if(_families.size() <= family)
       return;
-    cid id = id_from_type(T);
+    const ecsid id = _id_<T>::_id;
     if(_families[family].contains(id))
       return;
     _families[family].insert(id);
@@ -445,207 +446,290 @@ namespace ls::lecs
 
 
   template <typename T>
-  bool world::has(const eid entity)
+  bool world::has_relation(const ecsid entity)
   {
-    const auto& [group, row] = entities[entity];
+    return _entity_relations[entity].contains(_relation_<T>::_id);
+  }
 
-    const cid id = id_from_type(T);
 
-    // UNSURE maybe specilize to has_tag func
-    return std::any_of(
-      is_tag(id) ? group->components.begin() + group->size
-                                     : group->components.begin(),
-      group->components.end(),
-      [=](const cid c){return c == id;}
-      );
+  template<typename T>
+  const std::vector<ecsid>& world::get_relatives(const ecsid entity)
+  {
+    return _relations[_relation_<T>::_id].relatives[entity];
+  }
+
+
+  template <typename T>
+  void world::add_relation(const ecsid entity, const ecsid other)
+  {
+    const ecsid id = _relation_<T>::_id;
+    const ecsid inv = _relation_<T>::_inverse;
+    _entity_relations[entity].insert(id);
+    _entity_relations[other].insert(inv);
+
+    _relations[id].relatives[entity].push_back(other);
+    _relations[id].entities.push_back(entity);
+
+    _relations[inv].relatives[other].push_back(entity);
+    _relations[inv].entities.push_back(other);
+  }
+
+
+  template <typename T>
+  void world::remove_relation(const ecsid entity, const ecsid other)
+  {
+    remove_relation(entity, other, _relation_<T>::_id);
+  }
+
+
+
+
+
+  template<typename T>
+  ecsid world::register_id_as_tag()
+  {
+    const ecsid id = _component_hashes.size();
+    const ecsid t_id = id | _tag;
+    _component_hashes.push_back(create_hash());
+    _component_locations.emplace_back();
+    _set(T, t_id);
+    return t_id;
+  }
+
+  template <typename T, typename K>
+  ecsid world::register_as_tuple()
+  {
+    const ecsid id = _component_hashes.size();
+    const ecsid t_id = id | _tuple;
+    _component_hashes.push_back(create_hash());
+    _component_locations.emplace_back();
+    _set_tuple(T, K, t_id);
+    return t_id;
   }
 
   template <typename T>
-  T* world::get(const eid entity)
+  ecsid world::register_as_component()
   {
-    const auto& [group, row] = entities[entity];
-    cid cid_id = id_from_type(T);
-    for(int i = 0; i < group->size; i++)
+    const ecsid id = _component_hashes.size();
+    _component_hashes.push_back(create_hash());
+    _component_locations.emplace_back();
+    _set(T, id);
+    return id;
+  }
+
+
+  template <typename T>
+  void world::add(const ecsid entity)
+  {
+    const ecsid id = _get(T) ? _get(T) : register_id_as_tag<T>();
+     // TODO if actual component, add it and set it to zero
+    auto& [cgroup, crow] = entities[entity];
+
+    if(_component_locations[id ^ _tag].contains(cgroup->group_hash))
+      return;
+
+    const hash chash = _component_hashes[id ^ _tag];
+    const hash nhash = thash(cgroup->group_hash, chash);
+
+    group* ngroup = get_next_group(cgroup, nhash, id, false, 0);
+    finalize_group(ngroup);
+
+    auto [nrow, swent] = cgroup->ereloc(ngroup, crow);
+
+    entities[swent].row = crow;
+    cgroup = ngroup;
+    crow = nrow;
+  }
+
+  template <typename T, typename K>
+  void world::add(const ecsid entity)
+  {
+    const ecsid id = _get_tuple_id(T, K) ? _get_tuple_id(T, K) : register_as_tuple<T, K>();
+    const ecsid realid = id ^ _tag;
+    auto& [cgroup, crow] = entities[entity];
+
+    if(_component_locations[realid].contains(cgroup->group_hash))
+      return;
+
+    const hash chash = _component_hashes[realid];
+    const hash nhash = thash(cgroup->group_hash, chash);
+
+    group* ngroup = get_next_group(cgroup, nhash, id, false, _get_tuple_size(T, K));
+    finalize_group(ngroup);
+
+    auto [nrow, swent] = cgroup->ereloc(ngroup, crow);
+
+    entities[swent].row = crow;
+    cgroup = ngroup;
+    crow = nrow;
+  }
+
+  template <typename T, typename K, typename... Args>
+  void world::add(const ecsid entity, Args&&... args)
+  {
+    const ecsid id = _get_tuple_id(T, K) ? _get_tuple_id(T, K) : register_as_tuple<T, K>();
+    const ecsid realid = id ^ _tuple;
+
+    auto& [cgroup, crow] = entities[entity];
+
+    if(_component_locations[realid].contains(cgroup->group_hash))
     {
-      if(group->components[i] == cid_id)
-        return (T*) group->columns[i]->at(row);
+      for(size_t k = 0; k < cgroup->size; k++)
+      {
+        if(cgroup->components[k] == id)
+        {
+          cgroup->columns[k]->aplace<T>(crow, std::forward<Args>(args)...);
+          return;
+        }
+      }
+    }
+
+    const hash chash = _component_hashes[realid];
+    const hash nhash = thash(cgroup->group_hash, chash);
+
+    group* ngroup = get_next_group(cgroup, nhash, id, false, _get_tuple_size(T, K));
+    finalize_group(ngroup);
+
+    auto [nrow, swent] = cgroup->ereloc(ngroup, crow);
+    ngroup->columns[ngroup->columns.size()-1]->aplace<T>(nrow, std::forward<Args>(args)...);
+
+    entities[swent].row = crow;
+    cgroup = ngroup;
+    crow = nrow;
+  }
+
+  template <typename T, typename... Args>
+  void world::add(const ecsid entity, Args&&... args)
+  {
+    const ecsid id = _get(T) ? _get(T) : register_as_component<T>();
+    auto& [cgroup, crow] = entities[entity];
+
+    if(_component_locations[id].contains(cgroup->group_hash))
+    {
+      for(size_t k = 0; k < cgroup->size; k++)
+      {
+        if(cgroup->components[k] == id)
+        {
+          cgroup->columns[k]->aplace<T>(crow, std::forward<Args>(args)...);
+          return;
+        }
+      }
+    }
+
+    const hash chash = _component_hashes[id];
+    const hash nhash = thash(cgroup->group_hash, chash);
+
+    group* ngroup = get_next_group(cgroup, nhash, id, false, sizeof(T));
+    finalize_group(ngroup);
+
+    auto [nrow, swent] = cgroup->ereloc(ngroup, crow);
+    ngroup->columns[ngroup->columns.size()-1]->aplace<T>(nrow, std::forward<Args>(args)...);
+
+    entities[swent].row = crow;
+    cgroup = ngroup;
+    crow = nrow;
+  }
+
+  template <typename T>
+  void world::add(ecsid entity, ecsid other)
+  {
+    // TODO
+  }
+
+  template <typename T, typename K>
+  void world::remove(const ecsid entity)
+  {
+    const ecsid id = _get_tuple_id(T, K);
+    if(!id) return;
+    const ecsid realid = id ^ _tag;
+    auto& [cgroup, crow] = entities[entity];
+    if(!_component_locations[realid].contains(cgroup->group_hash)) return;
+
+    const hash chash = _component_hashes[realid];
+    const hash nhash = thash(cgroup->group_hash, chash);
+
+    group* ngroup = get_next_group(cgroup, nhash, id, true, 0);
+    finalize_group(ngroup);
+
+    auto [nrow, swent] = cgroup->ereloc(ngroup, crow, id);
+
+    entities[swent].row = crow;
+    cgroup = ngroup;
+    crow = nrow;
+  }
+
+  template <typename T>
+  void world::remove(const ecsid entity)
+  {
+    const ecsid id = _get(T);
+    if(!id) return;
+    auto& [cgroup, crow] = entities[entity];
+    if(!_component_locations[id].contains(cgroup->group_hash)) return;
+
+    const hash chash = _component_hashes[id];
+    const hash nhash = thash(cgroup->group_hash, chash);
+
+    group* ngroup = get_next_group(cgroup, nhash, id, true, 0);
+    finalize_group(ngroup);
+
+    auto [nrow, swent] = cgroup->ereloc(ngroup, crow, id);
+
+    entities[swent].row = crow;
+    cgroup = ngroup;
+    crow = nrow;
+  }
+
+  template <typename T>
+  void world::remove(ecsid entity, ecsid other)
+  {
+    // TODO
+  }
+
+  template <typename T, typename K>
+  bool world::has(const ecsid entity)
+  {
+    const ecsid id = _get_tuple_id(T, K);
+    if(!id) return false;
+    const auto& [group, row] = entities[entity];
+    return _component_locations[id ^ _tag].contains(group->group_hash);
+  }
+
+  template<typename T>
+  bool world::has(const ecsid entity)
+  {
+    const ecsid id = _get(T);
+    if(!id) return false;
+    const auto& [group, row] = entities[entity];
+    return _component_locations[id].contains(group->group_hash);
+  }
+
+  template <typename T, typename K>
+  T* world::get(const ecsid entity)
+  {
+    const ecsid id = _get_tuple_id(T, K);
+    if(!id || !_get_tuple_size(T, K)) return nullptr;
+    const auto& [group, row] = entities[entity];
+    for(size_t k = 0; k < group->size; k++)
+    {
+      if(group->components[k] == id)
+        return (T*) group->columns[k]->at(row);
+    }
+    return nullptr;
+  }
+
+  template <typename T>
+  T* world::get(const ecsid entity)
+  {
+    const ecsid id = _get(T);
+    if(!id) return nullptr;
+    const auto& [group, row] = entities[entity];
+    for(size_t k = 0; k < group->size; k++)
+    {
+      if(group->components[k] == id)
+        return (T*) group->columns[k]->at(row);
     }
     return nullptr;
   }
 
 
-  template<typename T>
-  void world::tag(eid entity)
-  {
-    const cid cid_id = id_from_type(T);
-    if(!(cid_id >> to_tag))   // UNSURE trust them perhaps
-      return; // not a tag!
-
-    cid realid = to_realid_tag(cid_id);
-
-    hash cid_hash = _component_hashes[to_realid_tag(cid_id)];
-    auto& er = entities[entity];
-
-    for(size_t k = er.group->size; k < er.group->components.size(); k++)
-    {
-      if(er.group->components[k] == cid_id)
-        return;
-    }
-
-    const hash next_group_hash = thash(er.group->group_hash, cid_hash);
-
-    group* next_group_ptr;
-    if(!groups.contains(next_group_hash)) [[unlikely]]
-    {
-      next_group_ptr = create_group(er.group, next_group_hash, true);
-      _component_groups_vec[to_realid_tag(cid_id)].push_back(next_group_hash);
-      next_group_ptr->components.push_back(cid_id);
-      register_group(next_group_ptr);
-    }
-    else [[likely]] next_group_ptr = groups[next_group_hash];
-
-    auto [next_row, swapped_entity]
-      = er.group->ereloc(next_group_ptr, er.row);
-    entities[swapped_entity].row = er.row;
-    er.group = next_group_ptr;
-    er.row = next_row;
-  }
-
-  template<typename T>
-  void world::remove_tag(eid entity)
-  {
-    const cid cid_id = id_from_type(T);
-    if(!(cid_id >> to_tag))   // UNSURE trust them perhaps
-      return; // not a tag!
-
-    eid_record& er = entities[entity];
-
-    hash cid_hash = _component_hashes[to_realid_tag(cid_id)];
-
-    const hash next_group_hash = thash(er.group->group_hash, cid_hash);;
-
-    group* next_group_ptr;
-    if(!groups.contains(next_group_hash)) [[unlikely]]
-    {
-      next_group_ptr = create_group(er.group, next_group_hash, true, cid_id);
-      _component_groups_vec[to_realid_tag(cid_id)].push_back(next_group_hash);
-      register_group(next_group_ptr);
-    }
-    else [[likely]] next_group_ptr = groups.at(next_group_hash);
-
-    auto [next_row, swapped_entity] = er.group->ereloc(next_group_ptr, er.row, cid_id);
-
-    entities[swapped_entity].row = er.row;
-    er.group = next_group_ptr;
-    er.row = next_row;
-  }
-
-  template <typename T, typename... Args>
-  void world::add(const eid entity, Args&&... args)
-  {
-    const cid cid_id = id_from_type(T);
-    if(cid_id >> to_tag) return tag<T>(entity); // dedicated method for tags!
-
-    const hash cid_hash = _component_hashes[cid_id];
-
-    auto& [group_ptr, current_row]= entities[entity];
-
-    for(size_t k = 0; k < group_ptr->size; k++)
-    {
-      if(group_ptr->components[k] == cid_id)
-      {
-        group_ptr->columns[k]->aplace<T>(current_row, std::forward<Args>(args)...);
-        return;
-      }
-    }
-
-    const hash next_group_hash = thash(group_ptr->group_hash, cid_hash);
-
-    group* next_group_ptr;
-    if(!groups.contains(next_group_hash)) [[unlikely]]
-    {
-      const size_t cid_size = sizeof(T);
-      next_group_ptr = create_group(group_ptr, next_group_hash, false);
-
-      _component_groups_vec[cid_id].push_back(next_group_hash);
-
-      // The group has components up until its size member at which position tags start
-      // push the tag at that location to the end of the vector and put the component
-      // at that position
-      next_group_ptr->components.push_back(next_group_ptr->components[next_group_ptr->size - 1]);
-      next_group_ptr->components[next_group_ptr->size - 1] = cid_id;
-      // Since columns and components are symmetrical, this is perfect
-      next_group_ptr->columns.push_back(
-        new column{
-          INIT_CAP, 0, cid_size,
-          malloc(INIT_CAP * cid_size)
-        });
-
-      register_group(next_group_ptr);
-    }
-    else [[likely]] next_group_ptr = groups.at(next_group_hash);
-
-    auto [next_row, swapped_entity]
-      = group_ptr->ereloc(next_group_ptr, current_row);
-
-    for(size_t k = 0; k < next_group_ptr->size; k++)
-    {
-      if(next_group_ptr->components[k] == cid_id)
-      {
-        next_group_ptr->columns[k]->aplace<T>(next_row, std::forward<Args>(args)...);
-        break;
-      }
-    }
-
-    entities[swapped_entity].row = current_row;
-    group_ptr = next_group_ptr;
-    current_row = next_row;
-  }
-
-  template <typename T>
-  void world::remove(const eid entity)
-  {
-    const cid cid_id = id_from_type(T);
-    if(cid_id >> to_tag) return remove_tag<T>(entity);
-
-    const hash cid_hash = _component_hashes[to_realid_tag(cid_id)];
-
-    auto& [group_ptr, current_row]= entities[entity];
-
-    const hash next_group_hash = thash(group_ptr->group_hash, cid_hash);
-
-    group* next_group_ptr;
-    if(!groups.contains(next_group_hash)) [[unlikely]]
-    {
-      next_group_ptr = create_group(group_ptr, next_group_hash, false, cid_id);
-      _component_groups_vec[cid_id].push_back(next_group_hash);
-      register_group(next_group_ptr);
-    }
-    else [[likely]] next_group_ptr = groups.at(next_group_hash);
-
-    auto [next_row, swapped_entity]
-      = group_ptr->ereloc(next_group_ptr, current_row, cid_id);
-
-    entities[swapped_entity].row = current_row;
-    group_ptr = next_group_ptr;
-    current_row = next_row;
-  }
-
-  template <typename T, typename K>
-  void world::relate(eid entity)
-  {
-    // Relations:
-    // Tag, Tag w/o v .. Tag
-    // Entity, Entity .. extra
-    cid rel_id = _relation_<T, K>::_id;
-    if(!rel_id)
-    {
-      // this has no value, make it a tag
-      // in the other iteration where the relation has values, make it a component instead
-      _relation_<T, K>::_id = (_component_hashes.size() | ((cid)1<<to_tag));
-      _component_hashes.push_back(create_hash());
-    }
-
-    // add this TAG to archetype
-  }
 }

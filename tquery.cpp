@@ -31,10 +31,10 @@ namespace ls::lecs
 
   bool query::has_traverse(group* g)
   {
-    for(cid must_have : _has)
+    for(ecsid must_have : _has)
     {
       bool had = false;
-      for(cid component : g->components)
+      for(ecsid component : g->components)
       {
         if(must_have == component)
         {
@@ -49,9 +49,9 @@ namespace ls::lecs
 
   bool query::hasnt_traverse(group* g)
   {
-    for(cid must_not_have : _hasnt)
+    for(ecsid must_not_have : _hasnt)
     {
-      for(cid component : g->components)
+      for(ecsid component : g->components)
       {
         if(component == must_not_have) return false;
       }
@@ -86,8 +86,8 @@ namespace ls::lecs
     size_t current_size = _caches.size();
     for(int i = 0; i < _fetch.size(); i++)
     {
-      cid query_for = _fetch[i];
-      if(world::is_tag(query_for)) continue;
+      ecsid query_for = _fetch[i];
+      if(is_tag(query_for) || is_tuple(query_for)) continue;
       for(int k = 0; k < g->components.size(); k++)
       {
         if(g->components[k] == query_for)
@@ -110,32 +110,40 @@ namespace ls::lecs
     }
   }
 
+  std::unordered_set<hash> query::intersect(std::unordered_set<hash>& one, std::unordered_set<hash>& two)
+  {
+    std::unordered_set<hash> three {};
+    for(auto hash : one)
+    {
+      if(two.contains(hash)) three.insert(hash);
+    }
+    return three;
+  }
+
   void query::create_cache(world* w)
   {
-    cid of_cid = 0;
-    std::unordered_set<cid> one {}, two {}, three {};
+    ecsid of_cid = 0;
+    std::unordered_set<hash> one {}, two {}, three {};
     int last_mod = 1;
 
     if(!_has.empty())
     {
-      of_cid = world::is_tag(_has[0]) ? world::to_realid(_has[0]) : _has[0];
-      one = { w->_component_groups_vec[of_cid].begin(), w->_component_groups_vec[of_cid].end()};
+      of_cid = real_id(_has[0]);
+      one = { w->_component_locations[of_cid].begin(), w->_component_locations[of_cid].end() };
 
       for(int k = 1; k < _has.size(); k++)
       {
-        of_cid = world::is_tag(_has[k]) ? world::to_realid(_has[k]) : _has[k];
-        two = { w->_component_groups_vec[of_cid].begin(), w->_component_groups_vec[of_cid].end() };
+        of_cid = real_id(_has[k]);
+        two = { w->_component_locations[of_cid].begin(), w->_component_locations[of_cid].end() };
 
         if( k % 2 == 0 )
         {
-          one.clear();
-          std::ranges::set_intersection(three, two, std::inserter(one, one.begin()));
+          one = intersect(three, two);
           last_mod = 1;
         }
         else
         {
-          three.clear();
-          std::ranges::set_intersection(one, two, std::inserter(three, three.begin()));
+          three = intersect(one, two);
           last_mod = 0;
         }
       }
@@ -150,25 +158,22 @@ namespace ls::lecs
     {
       if(!of_cid)
       {
-        of_cid = world::is_tag(_hasnt[0]) ? world::to_realid(_hasnt[0]) : _hasnt[0];
-        one = {w->_component_groups_vec[of_cid].begin(), w->_component_groups_vec[of_cid].end()};
-
+        of_cid = real_id(_hasnt[0]);
+        one = {w->_component_locations[of_cid].begin(), w->_component_locations[of_cid].end()};
       }
       for(int k = 0; k < _hasnt.size(); k++)
       {
-        of_cid = world::is_tag(_hasnt[k]) ? world::to_realid(_hasnt[k]) : _hasnt[k];
-        two = {w->_component_groups_vec[of_cid].begin(), w->_component_groups_vec[of_cid].end()};
+        of_cid = real_id(_hasnt[k]);
+        two = {w->_component_locations[of_cid].begin(), w->_component_locations[of_cid].end()};
 
         if( k % 2 == 1 )
         {
-          one.clear();
-          std::ranges::set_intersection(three, two, std::inserter(one, one.begin()));
+          one = intersect(three, two);
           last_mod = 1;
         }
         else
         {
-          three.clear();
-          std::ranges::set_intersection(one, two, std::inserter(three, three.begin()));
+          three = intersect(one, two);
           last_mod = 0;
         }
       }
@@ -185,7 +190,7 @@ namespace ls::lecs
       for(auto hash : one)
       {
         bool exclusive = true;
-        for(unsigned long long check_for : _exclusive_in_family)
+        for(ecsid check_for : _exclusive_in_family)
         {
           // this is fine, since families are way way sparcer than components
           // it wouldn't make sense to create a container component -> family
@@ -219,19 +224,17 @@ namespace ls::lecs
 
     for(int k = 0; k < _fetch.size(); k++)
     {
-      of_cid = world::is_tag(_fetch[k]) ? world::to_realid(_fetch[k]) : _fetch[k];
-      two = {w->_component_groups_vec[of_cid].begin(), w->_component_groups_vec[of_cid].end()};
+      of_cid = real_id(_fetch[k]);
+      two = {w->_component_locations[of_cid].begin(), w->_component_locations[of_cid].end()};
 
       if( k % 2 == 1)
       {
-        one.clear();
-        std::ranges::set_intersection(three, two, std::inserter(one, one.begin()));
+        one = intersect(three, two);
         last_mod = 1;
       }
       else
       {
-        three.clear();
-        std::ranges::set_intersection(one, two, std::inserter(three, three.begin()));
+        three = intersect(one, two);
         last_mod = 0;
       }
     }
@@ -243,9 +246,9 @@ namespace ls::lecs
     size_t current_size = 0;
     for(auto hash : one)
     {
-      for(cid query_for : _fetch)
+      for(ecsid query_for : _fetch)
       {
-        if(world::is_tag(query_for)) continue;
+        if(is_tag(query_for) | is_tuple(query_for)) continue;
         group* g = w->groups[hash];
         for(int k = 0; k < g->size; k++)
         {
@@ -272,4 +275,6 @@ namespace ls::lecs
     }
   }
 #endif
+
+
 }

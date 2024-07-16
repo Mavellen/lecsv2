@@ -16,52 +16,74 @@ namespace ls::lecs
 #ifndef INIT_CAP_ENTITIES
 #define INIT_CAP_ENTITIES 100
 #endif
-
-  using eid = uint32_t;
-  using cid = uint64_t;
+  using ecsid = int32_t;
   using hash = uint64_t;
+  using tupid = uint64_t;
+
   using family = uint8_t;
 
   constexpr size_t INIT_CAP = 10;
   constexpr hash VOID_HASH = 0;
-  constexpr size_t HASH_SIZE = sizeof(hash);
-  constexpr size_t COMPONENT_SIZE = sizeof(cid);
+  constexpr size_t HASH_SIZE = sizeof(hash) * 8;
+  constexpr size_t COMPONENT_SIZE = sizeof(ecsid) * 8;
+  constexpr char RESERVED = 3;
 
-#define to_tag (COMPONENT_SIZE-1)
-#define to_tt_relation (COMPONENT_SIZE-2)
-#define to_te_relation (COMPONENT_SIZE-3)
-#define to_tWv_relation (COMPONENT_SIZE-4)
+#define _set(T, id) _id_<T>::_id = id
+#define _get(T) _id_<T>::_id
+#define _set_tuple(T, K, id) _pair_<T, K>::_id = id; _pair_<T, K>::_size = sizeof(T)
+#define _get_tuple_id(T, K) _pair_<T, K>::_id
+#define _get_tuple_size(T, K) _pair_<T, K>::_size
+
+#define _tag ((ecsid)1 << COMPONENT_SIZE-1)
+#define _pair ((ecsid)1 << COMPONENT_SIZE-2)
+#define _tuple ((ecsid)1 << COMPONENT_SIZE-3)
+
+#define _left(tupid) (ecsid)tupid
+#define _right(tupid) (ecsid)(id >> COMPONENT_SIZE/2)
+#define _combine(left, right) (((tupid)left)<<(COMPONENT_SIZE/2) | right)
+
+  constexpr bool is_tag(const ecsid id){ return id >> (COMPONENT_SIZE-1); }
+  constexpr bool is_pair(const tupid id){ return (id << 1) >> (COMPONENT_SIZE-1); }
+  constexpr bool is_tuple(const ecsid id){ return (id << 2) >> (COMPONENT_SIZE-1); }
+  constexpr ecsid real_id(const ecsid id){ return (id << RESERVED) >> (RESERVED); }
+  constexpr void* imalloc(const size_t size){ return malloc(size); }
 
   struct query;
   struct _exclusive_has_;
   struct _fetch_;
 
   template<class T>
-  struct _component_
+  struct _id_
   {
-    static constexpr cid _id {};
+    static ecsid _id;
+  };
+  template<typename T> ecsid _id_<T>::_id = 0;
+
+  template<class T, class K>
+  struct _pair_
+  {
+    static ecsid _id;
+    static size_t _size;
+  };
+  template<class T, class K> ecsid _pair_<T,K>::_id = 0;
+  template<class T, class K> size_t _pair_<T,K>::_size = 0;
+
+  template<class T, class K>
+  struct tuple
+  {
+    typedef T _left;
+    typedef K _right;
+    T* data;
   };
 
-#define new_component(type, id)\
-static_assert(id > 0 && "ID 0 is reserved!");\
-template<> struct ls::lecs::_component_<type>{\
-static constexpr cid _id {id};\
-};\
-
-#define id_from_type(type) _component_<type>::_id
-
-#define new_tag(type, id)\
-static_assert(id > 0 && "ID 0 is reserved!");\
-template<> struct ls::lecs::_component_<type>{\
-static constexpr cid _id {(cid)id | ((cid)1<<to_tag)};\
-};\
-
-  template<typename T, typename K>
+  template<class T>
   struct _relation_
   {
-    static cid _id;
+    static ecsid _id;
+    static ecsid _inverse;
   };
-  template<typename T, typename K> cid _relation_<T,K>::_id = 0;
+  template<typename T> ecsid _relation_<T>::_id = 0;
+  template<typename T> ecsid _relation_<T>::_inverse = 0;
 
   struct column
   {
@@ -84,18 +106,23 @@ static constexpr cid _id {(cid)id | ((cid)1<<to_tag)};\
     group()
     {
       entities.reserve(INIT_CAP_ENTITIES);
-      size = 0;
     };
-    group(group& g, hash h, bool is_tag, cid exclude = 0);
-    group(const group& g, hash h, bool is_tag, cid exclude = 0);
-    eid evict_entity(size_t row);
-    std::pair<size_t, eid> ereloc(group* to, size_t frow, eid excludee = 0);
+    ecsid evict_entity(size_t row);
+    std::pair<size_t, ecsid> ereloc(group* to, size_t frow, ecsid excludee = 0);
 
     hash group_hash {0};
     int size = 0;
+    bool is_finalized = false;
     std::vector<column*> columns {};
-    std::vector<eid> entities {};
-    std::vector<cid> components {};
+    std::vector<ecsid> entities {};
+    std::vector<ecsid> components {};
+  };
+
+  struct broker
+  {
+    ecsid inverse;
+    std::vector<ecsid> entities {};
+    std::unordered_map<ecsid, std::vector<ecsid>> relatives {};
   };
 
   struct world
@@ -107,62 +134,102 @@ static constexpr cid _id {(cid)id | ((cid)1<<to_tag)};\
       size_t row;
     };
   private:
-    static bool is_tag(const cid id){ return (id >> to_tag); }
-    static bool is_ttr(const cid id){ return (id >> to_tt_relation); }
-    static bool is_ter(const cid id){ return (id >> to_te_relation); }
-    static bool is_tevr(const cid id){ return (id >> to_tWv_relation); }
-    static cid to_realid_tag(const cid id){return id ^ ((cid)1<<to_tag);}
-
     static hash create_hash();
     static hash thash(hash h1, hash h2);
-  public:
-    explicit world(size_t ct_amount);
-    eid new_entity();
-    cid new_relation();
-    family new_family();
-    void destroy_entity(eid entity);
     template<typename T>
-    void include_in_family(family f);
-    template<typename T>
-    bool has(eid entity);
-    template<typename T>
-    T* get(eid entity);
-    template <typename T, typename... Args>
-    void add(eid entity, Args&&... args);
-    template<typename T>
-    void tag(eid entity);
+    ecsid register_id_as_tag();
     template<typename T, typename K>
-    void relate(eid entity);
-    template<typename T, typename K, typename N, typename... Args>
-    void relate(eid entity, Args&&... args);
+    ecsid register_as_tuple();
     template<typename T>
-    void remove_tag(eid entity);
-    template<typename T>
-    void remove(eid entity);
-    void register_query(query* q);
-  private:
+    ecsid register_as_component();
+    [[nodiscard]]
+    group* get_next_group(const group* current, hash nhash, ecsid nid, bool remove, size_t size);
+    void finalize_group(group* group);
     void register_group(group* g);
-    [[nodiscard]] group* create_group(const group* og, hash gh, bool is_tag, cid excludee = 0);
+  public:
+    world();
+
+
+
+    family new_family();
+    template<typename T>
+    void include_in_family(family family);
+    void register_query(query* q);
+
+
+
+    // add a Tag w/o data, where T's id is the identifier
+    template<typename T>
+    void add(ecsid entity);
+    // add a (T,K) pair w/o data, where T's id is the identifier
+    template<typename T, typename K>
+    void add(ecsid entity);
+    // Add a (T,K) pair with data, where T's id is the identifier
+    template<typename T, typename K, typename... Args>
+    void add(ecsid entity, Args&&... args);
+    // Add a component with data, where T's id is the identifier
+    template<typename T, typename... Args>
+    void add(ecsid entity, Args&&... args);
+    // Add a (T,E) pair w/o data, where T's id is the identifier
+    template<typename T>
+    void add(ecsid entity, ecsid other);
+    // maybe add void add(eid entity, eid other, Args&&... args) for (T,E) with data
+
+    template<typename T, typename K>
+    void remove(ecsid entity);
+    template<typename T>
+    void remove(ecsid entity);
+    template<typename T>
+    void remove(ecsid entity, ecsid other);
+
+    template<typename T, typename K>
+    bool has(ecsid entity);
+    template<typename T>
+    bool has(ecsid entity);
+
+    template<typename T, typename K>
+    T* get(ecsid entity);
+    template<typename T>
+    T* get(ecsid entity);
+
+    ecsid entity();
+    void erase(ecsid entity);
+
 
   private:
-    eid e_counter = 1;
-    family f_counter = 1;
-    std::queue<eid> open_indices {};
+    template<typename T>
+    void add_relation(ecsid entity, ecsid other);
+    template<typename T>
+    void remove_relation(ecsid entity, ecsid other);
+    void remove_relation(ecsid entity, ecsid other, ecsid id);
+    void clear_relation(ecsid entity, ecsid relation);
+    template<typename T>
+    const std::vector<ecsid>& get_relatives(ecsid entity);
+    template<typename T>
+    bool has_relation(ecsid entity);
 
+  private:
     static constexpr std::hash<std::string> hasher {};
+
+    ecsid entity_counter = 1;
+    std::queue<ecsid> _open_indices {};
+    family f_counter = 1;
 
     std::vector<query*> queries {};
     std::unordered_map<hash, group*> groups {};
     std::vector<eid_record> entities {};
-    std::vector<std::vector<hash>> _component_groups_vec {};
-    std::vector<std::unordered_set<cid>> _families {};
+    std::vector<std::unordered_set<ecsid>> _families {};
     std::vector<hash> _component_hashes {};
-    std::vector<hash> _relations {};
-    // entity-entity relations dont need to be in archetypes
-    // not only for the fact that this would lead to a doubling of archetypes
-    // because every archetype can be with or without a relation of such an id
-    // also its just entity-entity, there is not real values involved
-    //std::unordered_map<eid, std::vector<ee_relation>> _entity_entity_relations {};
+    std::vector<std::unordered_set<hash>> _component_locations {};
+
+
+
+    // For these, it doesn't make sense to create a record since entities can
+    // have many relations. Just make a lookup
+    std::vector<std::unordered_set<ecsid>> _entity_relations {};
+    std::unordered_map<ecsid, broker> _relations {};
+
+
 
     friend query;
     friend group;
@@ -184,31 +251,48 @@ static constexpr cid _id {(cid)id | ((cid)1<<to_tag)};\
     };
   public:
     template<typename T, typename K, typename... N>
-    void has(){ _has.push_back(id_from_type(T)); has<K, N...>(); }
+    void has(){ _has.push_back(_id_<T>::_id); has<K, N...>(); }
     template<typename T>
-    void has(){ _has.push_back(id_from_type(T)); }
+    void has(){ _has.push_back(_id_<T>::_id); }
+    template<typename T, typename K, typename N, typename... Z>
+    void has_tuple(){ _has.push_back(_get_tuple_id(T, K)); has_tuple<N, Z...>();}
+    template<typename T, typename K>
+    void has_tuple(){ _has.push_back(_get_tuple_id(T, K)); }
     template<typename T, typename K, typename... N>
-    void has_not(){ _hasnt.push_back(id_from_type(T)); has_not<K, N...>(); }
+    void has_not(){ _hasnt.push_back(_id_<T>::_id); has_not<K, N...>(); }
     template<typename T>
-    void has_not(){ _hasnt.push_back(id_from_type(T)); }
+    void has_not(){ _hasnt.push_back(_id_<T>::_id); }
+    template<typename T, typename K, typename N, typename... Z>
+    void has_not_tuple(){ _hasnt.push_back(_get_tuple_id(T, K)); has_not_tuple<N, Z...>();}
+    template<typename T, typename K>
+    void has_not_tuple(){_hasnt.push_back(_get_tuple_id(T, K));}
     template<typename T, typename K, typename... N>
-    void exclusive(){ _exclusive_in_family.push_back(id_from_type(T)); exclusive<K, N...>();}
+    void exclusive(){ _exclusive_in_family.push_back(_id_<T>::_id); exclusive<K, N...>();}
     template<typename T>
-    void exclusive(){ _exclusive_in_family.push_back(id_from_type(T));}
+    void exclusive(){ _exclusive_in_family.push_back(_id_<T>::_id);}
+    template<typename T, typename K, typename N, typename... Z>
+    void has_exclusive_tuple(){ _exclusive_in_family.push_back(_get_tuple_id(T, K)); has_exclusive_tuple<N, Z...>();}
+    template<typename T, typename K>
+    void has_exclusive_tuple(){ _exclusive_in_family.push_back(_get_tuple_id(T, K));}
     template<typename T, typename K, typename... N>
-    void fetch(){ _fetch.push_back(id_from_type(T)); fetch<K, N...>(); }
+    void fetch(){ _fetch.push_back(_id_<T>::_id); fetch<K, N...>(); }
     template<typename T>
-    void fetch(){ _fetch.push_back(id_from_type(T)); }
+    void fetch(){ _fetch.push_back(_id_<T>::_id); }
+    template<typename T, typename K, typename N, typename... Z>
+    void fetch_tuple(){ _fetch.push_back(_get_tuple_id(T, K)); fetch_tuple<N, Z...>();}
+    template<typename T, typename K>
+    void fetch_tuple(){ _fetch.push_back(_get_tuple_id(T, K));}
 
     template<typename... T>
-    void each(void(*lambda)(eid, T*...));
+    void each(void(*lambda)(ecsid, T*...));
+
     template<typename... T, typename... K>
-    void each(void(*lambda)(eid,std::tuple<K...>&,T*...),std::tuple<K...>&);
+    void each(void(*lambda)(ecsid,std::tuple<K...>&,T*...),std::tuple<K...>&);
 
     template<typename... T>
-    void batch_each(void(*lambda)(const eid*,size_t,T*...));
+    void batch_each(void(*lambda)(const ecsid*,size_t,T*...));
     template<typename... T, typename... K>
-    void batch_each(void(*lambda)(const eid*,size_t,std::tuple<K...>&,T*...),std::tuple<K...>&);
+    void batch_each(void(*lambda)(const ecsid*,size_t,std::tuple<K...>&,T*...),std::tuple<K...>&);
 
     template<typename... T>
     void anon_each(void(*lambda)(T*...));
@@ -223,6 +307,7 @@ static constexpr cid _id {(cid)id | ((cid)1<<to_tag)};\
     void inspect_group(world* w, group* g);
     void create_cache(world* w);
   private:
+    std::unordered_set<hash> intersect(std::unordered_set<hash>&,std::unordered_set<hash>&);
     void fetch_traverse(group*);
     bool has_traverse(group*);
     bool hasnt_traverse(group*);
@@ -236,10 +321,10 @@ static constexpr cid _id {(cid)id | ((cid)1<<to_tag)};\
     char _up_to_date = 0;
   private:
     std::vector<cache> _caches {};
-    std::vector<cid> _has {};
-    std::vector<cid> _hasnt {};
-    std::vector<cid> _fetch {};
-    std::vector<cid> _exclusive_in_family {};;
+    std::vector<ecsid> _has {};
+    std::vector<ecsid> _hasnt {};
+    std::vector<ecsid> _fetch {};
+    std::vector<ecsid> _exclusive_in_family {};;
 
     friend world;
   };
