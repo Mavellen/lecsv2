@@ -5,13 +5,14 @@ set(CMAKE_CXX_STANDARD 23)
 
 #add_compile_options(-O2)
 
-add_executable(ecs_final_two
-        tquery.cpp
-        tcolumn.cpp
-        tgroup.cpp
-        tworld.cpp
-        thimpl.h
+add_library(ecs_final_two
+        #tquery.cpp
+        #tcolumn.cpp
+        #tgroup.cpp
+        #tworld.cpp
+        #thimpl.h
         main.cpp
+        lecs.h
 )
 
 

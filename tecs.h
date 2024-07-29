@@ -2,7 +2,6 @@
 
 #include <vector>
 #include <unordered_map>
-#include <queue>
 #include <string>
 #include <cstdint>
 #include <functional>
@@ -16,7 +15,7 @@ namespace ls::lecs
 #ifndef INIT_CAP_ENTITIES
 #define INIT_CAP_ENTITIES 100
 #endif
-  using ecsid = int32_t;
+  using ecsid = uint32_t;
   using hash = uint64_t;
   using tupid = uint64_t;
 
@@ -26,7 +25,9 @@ namespace ls::lecs
   constexpr hash VOID_HASH = 0;
   constexpr size_t HASH_SIZE = sizeof(hash) * 8;
   constexpr size_t COMPONENT_SIZE = sizeof(ecsid) * 8;
+  constexpr size_t ECSID_SIZE = sizeof(ecsid) * 8;
   constexpr char RESERVED = 3;
+  constexpr size_t VERSION_BITS = 6;
 
 #define _set(T, id) _id_<T>::_id = id
 #define _get(T) _id_<T>::_id
@@ -37,6 +38,10 @@ namespace ls::lecs
 #define _tag ((ecsid)1 << COMPONENT_SIZE-1)
 #define _pair ((ecsid)1 << COMPONENT_SIZE-2)
 #define _tuple ((ecsid)1 << COMPONENT_SIZE-3)
+
+#define _get_version(id) ((id >> (ECSID_SIZE - VERSION_BITS)) << (ECSID_SIZE - VERSION_BITS))
+#define _get_id(id) ((id << VERSION_BITS) >> VERSION_BITS)
+#define _set_version(id, version) ((((id >> ECSID_SIZE - VERSION_BITS) | version) << ECSID_SIZE - VERSION_BITS) | id)
 
 #define _left(tupid) (ecsid)tupid
 #define _right(tupid) (ecsid)(id >> COMPONENT_SIZE/2)
@@ -149,12 +154,12 @@ namespace ls::lecs
   public:
     world();
 
-
-
     family new_family();
+
     template<typename T>
     void include_in_family(family family);
-    void register_query(query* q);
+    template<typename T, typename K>
+    void include_in_family(family family);
 
 
 
@@ -195,24 +200,50 @@ namespace ls::lecs
     ecsid entity();
     void erase(ecsid entity);
 
+    void register_query(query* q);
 
   private:
     template<typename T>
-    void add_relation(ecsid entity, ecsid other);
+    void add_relation(ecsid entity, ecsid other)
+    {
+      const ecsid id = _relation_<T>::_id;
+      const ecsid inv = _relation_<T>::_inverse;
+      _entity_relations[entity].insert(id);
+      _entity_relations[other].insert(inv);
+
+      _relations[id].relatives[entity].push_back(other);
+      _relations[id].entities.push_back(entity);
+
+      _relations[inv].relatives[other].push_back(entity);
+      _relations[inv].entities.push_back(other);
+    }
     template<typename T>
-    void remove_relation(ecsid entity, ecsid other);
+    void remove_relation(ecsid entity, ecsid other)
+    {
+      remove_relation(entity, other, _relation_<T>::_id);
+    }
     void remove_relation(ecsid entity, ecsid other, ecsid id);
     void clear_relation(ecsid entity, ecsid relation);
     template<typename T>
-    const std::vector<ecsid>& get_relatives(ecsid entity);
+    const std::vector<ecsid>& get_relatives(ecsid entity)
+    {
+      return _relations[_relation_<T>::_id].relatives[entity];
+    }
     template<typename T>
-    bool has_relation(ecsid entity);
+    bool has_relation(ecsid entity)
+    {
+      return _entity_relations[entity].contains(_relation_<T>::_id);
+    }
 
   private:
     static constexpr std::hash<std::string> hasher {};
 
-    ecsid entity_counter = 1;
-    std::queue<ecsid> _open_indices {};
+    std::vector<ecsid> _entities {};
+    ecsid _head;
+    size_t _count = 0;
+
+    //ecsid entity_counter = 1;
+    //std::queue<ecsid> _open_indices {};
     family f_counter = 1;
 
     std::vector<query*> queries {};
@@ -233,10 +264,6 @@ namespace ls::lecs
 
     friend query;
     friend group;
-#ifdef V2
-    friend _exclusive_has_;
-    friend _fetch_;
-#endif
   };
 
 
@@ -254,38 +281,29 @@ namespace ls::lecs
     void has(){ _has.push_back(_id_<T>::_id); has<K, N...>(); }
     template<typename T>
     void has(){ _has.push_back(_id_<T>::_id); }
-    template<typename T, typename K, typename N, typename... Z>
-    void has_tuple(){ _has.push_back(_get_tuple_id(T, K)); has_tuple<N, Z...>();}
     template<typename T, typename K>
     void has_tuple(){ _has.push_back(_get_tuple_id(T, K)); }
     template<typename T, typename K, typename... N>
     void has_not(){ _hasnt.push_back(_id_<T>::_id); has_not<K, N...>(); }
     template<typename T>
     void has_not(){ _hasnt.push_back(_id_<T>::_id); }
-    template<typename T, typename K, typename N, typename... Z>
-    void has_not_tuple(){ _hasnt.push_back(_get_tuple_id(T, K)); has_not_tuple<N, Z...>();}
     template<typename T, typename K>
     void has_not_tuple(){_hasnt.push_back(_get_tuple_id(T, K));}
     template<typename T, typename K, typename... N>
     void exclusive(){ _exclusive_in_family.push_back(_id_<T>::_id); exclusive<K, N...>();}
     template<typename T>
     void exclusive(){ _exclusive_in_family.push_back(_id_<T>::_id);}
-    template<typename T, typename K, typename N, typename... Z>
-    void has_exclusive_tuple(){ _exclusive_in_family.push_back(_get_tuple_id(T, K)); has_exclusive_tuple<N, Z...>();}
     template<typename T, typename K>
     void has_exclusive_tuple(){ _exclusive_in_family.push_back(_get_tuple_id(T, K));}
     template<typename T, typename K, typename... N>
     void fetch(){ _fetch.push_back(_id_<T>::_id); fetch<K, N...>(); }
     template<typename T>
     void fetch(){ _fetch.push_back(_id_<T>::_id); }
-    template<typename T, typename K, typename N, typename... Z>
-    void fetch_tuple(){ _fetch.push_back(_get_tuple_id(T, K)); fetch_tuple<N, Z...>();}
     template<typename T, typename K>
     void fetch_tuple(){ _fetch.push_back(_get_tuple_id(T, K));}
 
     template<typename... T>
     void each(void(*lambda)(ecsid, T*...));
-
     template<typename... T, typename... K>
     void each(void(*lambda)(ecsid,std::tuple<K...>&,T*...),std::tuple<K...>&);
 
@@ -326,146 +344,6 @@ namespace ls::lecs
     std::vector<ecsid> _fetch {};
     std::vector<ecsid> _exclusive_in_family {};;
 
-    friend world;
-  };
-#endif
-
-#ifdef V2
-  struct _has_
-  {
-    _has_() : lambda([](group*,int& i){i = 1;}){}
-    template<typename... T>
-    void construct();
-    void execute(group* g, int& i) const { lambda(g, i); }
-  private:
-    template<typename T>
-    void traverse(group* g, int& i, size_t& amount)
-    {
-      ++amount;
-      for(auto c : g->components)
-      {
-        if(component<T>::_id == c) i++;
-      }
-    }
-  private:
-    std::function<void(group*,int&)> lambda;
-  };
-
-  struct _has_not_
-  {
-    _has_not_() : lambda([](group*,int& i){i = 1;}) {}
-    template<typename... T>
-    void construct();
-    void execute(group* g, int& i) const { return lambda(g, i); }
-  private:
-    template<typename T>
-    void traverse(cid c, int& i)
-    {
-      if(component<T>::_id == c)
-        --i;
-    }
-  private:
-    std::function<void(group*,int&)> lambda;
-  };
-
-  struct _exclusive_has_
-  {
-    _exclusive_has_() : lambda([](world* w, group*,int& i){i = 1;}){}
-    template<typename... T>
-    void construct();
-    void execute(world* w, group* g, int& i) const { lambda(w, g, i); }
-  private:
-    template<typename T>
-    void traverse(world* w, group* g, int& i);
-  private:
-    std::function<void(world* w, group*,int&)> lambda;
-  };
-
-  struct _fetch_
-  {
-    _fetch_() : lambda([](world*,query*,group*,hash,size_t&){}) {};
-    template<typename... T>
-    void construct();
-    void execute(world* w, query* q, group* g, const hash gh, size_t& index) const {lambda(w,q,g,gh,index);}
-  private:
-    template<typename T>
-    void count()
-    {
-      ++amount;
-    }
-    template<typename T, typename... K>
-    void count()
-    {
-      ++amount;
-      count<K...>();
-    }
-    // void t_traverse(world* w, query* q, group* g, hash gh, size_t& index, bool& n){};
-    // template<typename... T>
-    // void t_traverse(world* w, query* q, group* g, hash gh, size_t& index, bool& n);
-    template<typename T, typename K, typename... N>
-    void t_traverse(world* w, query* q, group* g, hash gh, size_t& index, size_t& n);
-    // template<typename T>
-    // void t_traverse(world* w, query* q, group* g, hash gh, size_t& index, bool& n);
-    template<typename T>
-    void t_traverse(world* w, query* q, group* g, hash gh, size_t& index, size_t& n);
-  private:
-    size_t amount = 0;
-    std::function<void(world*,query*,group*,hash,size_t&)> lambda;
-  };
-
-
-  struct query
-  {
-  private:
-    struct ccom
-    {
-      std::vector<const column*> columns;
-      const group* g;
-    };
-  public:
-    template<typename... T>
-    void has(){ _has.construct<T...>(); }
-    template<typename... T>
-    void has_not(){ _has_not.construct<T...>(); }
-    template<typename... T>
-    void exclusive(){ _exclusive_has.construct<T...>(); }
-    template<typename... T>
-    void fetch(){ _fetch.construct<T...>(); }
-
-    template<typename... T>
-    void each(void(*lambda)(eid, T*...));
-    template<typename... T, typename... K>
-    void each(void(*lambda)(eid,std::tuple<K...>&,T*...),std::tuple<K...>&);
-
-    template<typename... T>
-    void batch_each(void(*lambda)(const eid*,size_t,T*...));
-    template<typename... T, typename... K>
-    void batch_each(void(*lambda)(const eid*,size_t,std::tuple<K...>&,T*...),std::tuple<K...>&);
-
-    template<typename... T>
-    void anon_each(void(*lambda)(T*...));
-    template<typename... T, typename... K>
-    void anon_each(void(*lambda)(std::tuple<K...>&, T*...),std::tuple<K...>&);
-
-    template <typename... T>
-    void batch_anon(void (*lambda)(size_t, T*...));
-    template<typename... T, typename... K>
-    void batch_anon(void(*lambda)(size_t,std::tuple<K...>&,T*...),std::tuple<K...>&);
-
-    void inspect_group(world* w, group* g, hash gh, size_t& index);
-  private:
-    template<typename T>
-    T* exec(const ccom& com, size_t column_index, size_t position);
-    template<typename T>
-    T* all_exec(const ccom& com, size_t column_index);
-    std::vector<ccom> _ccoms {};
-  private:
-    _has_ _has {};
-    _has_not_ _has_not {};
-    _exclusive_has_ _exclusive_has {};
-    _fetch_ _fetch {};
-
-    friend _fetch_;
     friend world;
   };
 #endif

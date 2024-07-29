@@ -2,24 +2,6 @@
 
 namespace ls::lecs
 {
-#ifdef V2
-  void query::inspect_group(world* w, group* g, const hash gh, size_t& index)
-  {
-    int i = 0;
-    _has.execute(g, i);
-    if(i <= 0) return;
-
-    i = 0;
-    _has_not.execute(g, i);
-    if(i <= 0) return;
-
-    i = 0;
-    _exclusive_has.execute(w, g, i);
-    if(i <= 0) return;
-
-    _fetch.execute(w, this, g, gh, index);
-  }
-#endif
 #ifdef V3
   void query::inspect_group(world* w, group* g)
   {
@@ -66,7 +48,7 @@ namespace ls::lecs
       family family = 0;
       for(int i = 0; i < w->_families.size(); i++)
       {
-        if(w->_families[family].contains(exclusive))
+        if(w->_families[family].contains(real_id(exclusive)))
         {
           family = i;
           break;
@@ -75,7 +57,7 @@ namespace ls::lecs
       if(family == 0) continue;
       for(auto c : g->components)
       {
-        if(w->_families[family].contains(c)) return false;
+        if(w->_families[family].contains(real_id(c))) return false;
       }
     }
     return true;
@@ -187,6 +169,11 @@ namespace ls::lecs
     three.clear();
     if(!_exclusive_in_family.empty())
     {
+      if(!of_cid)
+      {
+        of_cid = real_id(_exclusive_in_family[0]);
+        one = { w->_component_locations[of_cid].begin(), w->_component_locations[of_cid].end()};
+      }
       for(auto hash : one)
       {
         bool exclusive = true;
@@ -196,7 +183,7 @@ namespace ls::lecs
           // it wouldn't make sense to create a container component -> family
           // especially cause registering queries happens infrequently
           family family = 0;
-          for(int i = 0; i < w->_families.size(); i++)
+          for(int i = 1; i < w->_families.size(); i++)
           {
             if(w->_families[i].contains(check_for))
             {
@@ -204,10 +191,11 @@ namespace ls::lecs
               break;
             }
           }
-          if(family == 0) continue;
+          if(family == 0)
+            continue;
           for(auto c : w->groups[hash]->components)
           {
-            if(w->_families[family].contains(c))
+            if(w->_families[family].contains(c) && c != check_for)
             {
               exclusive = false;
               break;
@@ -248,7 +236,7 @@ namespace ls::lecs
     {
       for(ecsid query_for : _fetch)
       {
-        if(is_tag(query_for) | is_tuple(query_for)) continue;
+        if(is_tag(query_for)) continue;
         group* g = w->groups[hash];
         for(int k = 0; k < g->size; k++)
         {

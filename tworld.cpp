@@ -21,6 +21,7 @@ namespace ls::lecs
 
     entities.reserve(INIT_CAP_ENTITIES);
     entities.push_back({});
+    _entities.push_back(0);
   }
 
   hash world::create_hash()
@@ -102,18 +103,21 @@ namespace ls::lecs
   ecsid world::entity()
   {
     const auto void_group = groups[VOID_HASH];
-    size_t row = void_group->entities.size();
+    const size_t row = void_group->entities.size();
     ecsid generated;
-    if(_open_indices.empty())
+    if(_count > 0)
     {
-      generated = entity_counter++;
-      entities.push_back({void_group, row});
+      generated = _head | _get_version(_entities[_head]);
+      _head = _get_id(_entities[_head]);
+      _entities[_get_id(generated)] = generated;
+      _count--;
+      entities[_get_id(generated)] = {void_group, row};
     }
     else
     {
-      generated = _open_indices.front();
-      _open_indices.pop();
-      entities[generated] = {void_group, row};
+      generated = _entities.size();
+      _entities.push_back(generated);
+      entities.push_back({void_group, row});
     }
     void_group->entities.push_back(generated);
     return generated;
@@ -124,11 +128,15 @@ namespace ls::lecs
     auto& [group, row] = entities[entity];
     const ecsid swapped_entity = group->evict_entity(row);
     entities[swapped_entity] = {group, row};
-    _open_indices.push(entity);
-    entities[entity].row = -1;
+
+    const ecsid current_version = _get_version(entity);
+    const ecsid input_id = _set_version(_head, current_version+1);
+    _entities[_get_id(entity)] = input_id;
+    _head = _get_id(entity);
+    _count++;
+
+    entities[_get_id(entity)].row = -1;
   }
-
-
 
   family world::new_family()
   {
