@@ -175,9 +175,9 @@ void sim_next_archetype_created()
 {
   sim s;
   assert(s.atypes.size() == 1 && fail);
-  assert(s.atypes[0]->hash == 0 && fail);
+  assert(s.atypes[0]->_hash == 0 && fail);
   atype* at = s.get_next_atype(s.atypes[0], 1, 10, false, 0);
-  assert(at->hash == 1 && fail);
+  assert(at->_hash == 1 && fail);
   assert(at->size == 0 && fail);
   assert(at->clcs.empty() && fail);
   assert(at->dense_components.size() == 1 && fail);
@@ -191,7 +191,7 @@ void sim_next_archetype_fetched()
   s.atypes[1] = new atype(1);
   assert(s.atypes.size() == 2 && fail);
   atype* at = s.get_next_atype(s.atypes[0], 1, 10, false, 0);
-  assert(at->hash == 1 && fail);
+  assert(at->_hash == 1 && fail);
   assert(s.atypes.size() == 2 && fail);
   pass
 }
@@ -201,7 +201,7 @@ void sim_next_archetype_addto_component()
   atype* at1 = new atype(1);
   at1->include(0, 8);
   atype* at2 = s.get_next_atype(at1, 2, 1, false, 12);
-  assert(at2->hash == 2 && fail);
+  assert(at2->_hash == 2 && fail);
   assert(at2->dense_components.size() == 2 && at2->dense_components[0] == 0 &&
     at2->dense_components[1] == 1 && fail);
   assert(at2->sparse_components[0] == 0 && at2->sparse_components[1] == 1 && fail);
@@ -228,7 +228,7 @@ void sim_next_archetype_remove_tovoid()
   sim s;
   atype* at = s.get_next_atype(s.atypes[0], 1, 0, false, 0);
   atype* at2 = s.get_next_atype(at, 0, 0, true, 0);
-  assert(at2->hash == 0 && fail);
+  assert(at2->_hash == 0 && fail);
   assert(at2->dense_components.empty() && fail);
   pass
 }
@@ -335,6 +335,8 @@ void sim_remove_tag()
 {
   sim s;
   ecsid entity = s.entity();
+  std::vector<hash> hashes = s.c_hashes;
+  s.c_hashes.clear();
   s.c_hashes.push_back(0b1);
   s.c_hashes.push_back(0b10);
   s.c_hashes.push_back(0b100);
@@ -353,11 +355,14 @@ void sim_remove_tag()
   assert(s.atypes[0b110]->entities.size() == 1 && s.atypes[0b110]->dense_components.size() == 2 &&
     s.atypes[0b110]->clcs.size() == 2 && fail);
   pass
+  s.c_hashes = hashes;
 }
 void sim_remove_component()
 {
   sim s;
   ecsid entity = s.entity();
+  std::vector<hash> hashes = s.c_hashes;
+  s.c_hashes.clear();
   s.c_hashes.push_back(0b1);
   s.c_hashes.push_back(0b10);
   s.c_hashes.push_back(0b100);
@@ -377,6 +382,7 @@ void sim_remove_component()
   assert(s.atypes[0b101]->entities.size() == 1 && s.atypes[0b101]->dense_components.size() == 2 &&
     s.atypes[0b101]->clcs.size() == 1 && fail);
   pass
+  s.c_hashes = hashes;
 }
 void sim_invalid_entity_kappa()
 {

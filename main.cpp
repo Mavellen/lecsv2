@@ -9,9 +9,7 @@ using namespace ls::lecs;
 
 
 
-// TODO Relationships
-// TODO INVALIDATION MECHANISMS
-// TODO EVENTS LIKE ADDED COMPONENT
+
 
 int main()
 {

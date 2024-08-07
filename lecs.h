@@ -96,9 +96,9 @@ namespace ls::lecs
 
   struct atype
   {
-    explicit atype(const hash hash) : hash(hash)
+    explicit atype(const hash hash) : _hash(hash)
     {
-      sparse_components.reserve(tyfo::counter);
+      //sparse_components.reserve(tyfo::counter);
       entities.reserve(E_INIT);
     }
     ~atype()
@@ -149,8 +149,13 @@ namespace ls::lecs
     }
     ecsid evict_entity(const size_t row)
     {
-      const ecsid last_pos = entities.size() - 1;
-      const ecsid swapped_eid = entities[last_pos];
+      // const ecsid last_pos = entities.size() - 1;
+      // const ecsid swapped_eid = entities[last_pos];
+      const ecsid swapped_eid = entities.back();
+      if(swapped_eid > 100000)
+      {
+        int i = 0;
+      }
       for (const auto column : clcs)
       {
         column->rswap(row);
@@ -171,7 +176,7 @@ namespace ls::lecs
       const ecsid swapped_eid = evict_entity(frow);
       return {new_row, swapped_eid};
     }
-    hash hash;
+    hash _hash;
     size_t size = 0;
     std::vector<ecsid> dense_components {};
     std::vector<size_t> sparse_components;
@@ -231,12 +236,10 @@ namespace ls::lecs
         if(remove && id == nid) continue;
         if(i < current->size) natype->include(id, current->clcs[i]->element_size);
         else natype->include(id, 0);
-        // TODO c_locations[id].insert(natype->hash);
       }
       if(!remove)
       {
         natype->include(nid, size);
-        // TODO c_locations[nid].insert(natype->hash);
       }
       atypes[nhash] = natype;
       register_atype(natype);
@@ -273,9 +276,8 @@ namespace ls::lecs
       if(c_hashes.size() <= type_id)
       {
         c_hashes.push_back(create_hash());
-        // TODO c_locations.emplace_back();
       }
-      if(/* TODO c_locations[id].contains(r.at->hash)*/ r.at->cidx(type_id) != SIZE_MAX)
+      if(r.at->cidx(type_id) != SIZE_MAX)
       {
         if(sizeof(T) > 1)
         {
@@ -285,7 +287,7 @@ namespace ls::lecs
       }
 
       const hash chash = c_hashes[type_id];
-      const hash nhash = thash(r.at->hash, chash);
+      const hash nhash = thash(r.at->_hash, chash);
 
       atype* natype = get_next_atype(r.at, nhash, type_id, false, sizeof(T));
       auto [nrow, swent] = r.at->ereloc(natype, r.row);
@@ -303,10 +305,10 @@ namespace ls::lecs
       if(pair.first)
         return pair.first;
       record& r = e_locations[pair.second];
-      if(c_hashes.size() <= type_id || /* TODO !c_locations[id].contains(r.at->hash)*/ r.at->cidx(type_id) == SIZE_MAX) return 1;
+      if(c_hashes.size() <= type_id || r.at->cidx(type_id) == SIZE_MAX) return 1;
 
       const hash chash = c_hashes[type_id];
-      const hash nhash = thash(r.at->hash, chash);
+      const hash nhash = thash(r.at->_hash, chash);
 
       atype* natype = get_next_atype(r.at, nhash, type_id, true, sizeof(T));
       auto [nrow, swent] = r.at->ereloc(natype, r.row, type_id);
@@ -321,19 +323,24 @@ namespace ls::lecs
       entities = {};
       e_locations = {};
       c_hashes = {};
-      // TODO c_locations = {};
+      c_hashes = {};
+      c_hashes.reserve(tyfo::counter);
+      for(size_t i = 0; i < tyfo::counter; i++)
+      {
+        c_hashes.push_back(create_hash());
+      }
       atypes.insert({0, new atype(0)});
       queries = {};
       head = NULL_ID;
     }
     ~sim(){ reset(); }
+    size_t alive_entites() const { return entities.size() - avail_count; }
     void reset()
     {
       head = NULL_ID;
       avail_count = 0;
       entities.clear();
       e_locations.clear();
-      c_hashes.clear();
       families.clear();
       for(auto& pair : atypes)
       {
@@ -373,7 +380,7 @@ namespace ls::lecs
         return pair.first;
       const record& r = e_locations[pair.second];
       const ecsid swent = r.at->evict_entity(r.row);
-      e_locations[swent].row = r.row;
+      e_locations[ident(swent)].row = r.row; // ADDED IDENT
 
       const ecsid current_version = version(entity);
       const ecsid input_id = set_v(head, current_version+1);
@@ -435,7 +442,6 @@ namespace ls::lecs
     std::vector<record> e_locations;
 
     std::vector<hash> c_hashes;
-    // TODO std::vector<std::unordered_set<hash>> c_locations;
 
     std::vector<std::unordered_set<ecsid>> families;
 
@@ -469,6 +475,7 @@ namespace ls::lecs
     template<typename T>
     bool eval_system() const
     {
+      ecsid id = tyfo::id<T>;
       return allof.contains(tyfo::id<T>) && sizeof(T) > 1;
     }
     void eval_atype(const atype* at)
